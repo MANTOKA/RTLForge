@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+a.out
+sim.out
+*.vcd
+*.fst
+obj_dir
+runs
+
