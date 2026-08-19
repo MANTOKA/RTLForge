@@ -7,6 +7,7 @@ def test_parse_iverilog_syntax_error_without_explicit_severity() -> None:
     assert errors == [
         {
             "tool": "iverilog",
+            "severity": "ERROR",
             "type": "ERROR",
             "file": "counter_bad.v",
             "line": 7,
@@ -28,6 +29,7 @@ def test_parse_verilator_width_diagnostic() -> None:
     assert errors == [
         {
             "tool": "verilator",
+            "severity": "ERROR",
             "type": "WIDTH",
             "file": "counter.v",
             "line": 10,
