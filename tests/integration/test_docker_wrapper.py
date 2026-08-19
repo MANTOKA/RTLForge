@@ -31,6 +31,8 @@ def _run(command: list[str], *, timeout: int = 300) -> subprocess.CompletedProce
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
 
@@ -43,10 +45,10 @@ def docker_image() -> str:
     return IMAGE
 
 
-def _wrapper(docker_image: str, action: str, *fixture_names: str) -> dict:
+def _sandbox_command(docker_image: str) -> list[str]:
     docker = _docker_binary()
     mount = f"type=bind,source={REPO_ROOT},target=/repo,readonly"
-    command = [
+    return [
         docker,
         "run",
         "--rm",
@@ -54,11 +56,13 @@ def _wrapper(docker_image: str, action: str, *fixture_names: str) -> dict:
         "none",
         "--read-only",
         "--tmpfs",
-        "/work:rw,exec,size=64m",
+        "/work:rw,exec,size=64m,uid=10001,gid=10001,mode=0700",
         "--workdir",
         "/work",
         "--env",
         "TMPDIR=/work",
+        "--env",
+        "VERILOG_AGENT_INPUT_ROOT=/repo/tests/fixtures",
         "--pids-limit",
         "128",
         "--memory",
@@ -68,12 +72,34 @@ def _wrapper(docker_image: str, action: str, *fixture_names: str) -> dict:
         "--mount",
         mount,
         docker_image,
+    ]
+
+
+def _wrapper(
+    docker_image: str,
+    action: str,
+    *fixture_names: str,
+    environment: dict[str, str] | None = None,
+) -> dict:
+    command = _sandbox_command(docker_image)
+    for key, value in (environment or {}).items():
+        command[command.index(docker_image):command.index(docker_image)] = [
+            "--env",
+            f"{key}={value}",
+        ]
+    input_paths = [
+        name if name.startswith("/") else f"/repo/tests/fixtures/{name}"
+        for name in fixture_names
+    ]
+    command.extend(
+        [
         "python3",
         "-u",
         "/repo/tool_wrapper.py",
         action,
-        *(f"/repo/tests/fixtures/{name}" for name in fixture_names),
-    ]
+        *input_paths,
+        ]
+    )
     result = _run(command, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
@@ -117,3 +143,48 @@ def test_wrapper_does_not_write_build_products_to_repository(docker_image: str) 
 
     assert not (REPO_ROOT / "a.out").exists()
     assert not (REPO_ROOT / "sim.out").exists()
+
+
+@pytest.mark.integration
+def test_sandbox_runs_non_root_with_complete_toolchain(docker_image: str) -> None:
+    command = _sandbox_command(docker_image)
+    command.extend(
+        [
+            "sh",
+            "-c",
+            "test \"$(id -u)\" -ne 0"
+            " && command -v iverilog"
+            " && command -v verilator"
+            " && command -v yosys",
+        ]
+    )
+
+    result = _run(command)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration
+def test_input_outside_allowed_root_is_rejected(docker_image: str) -> None:
+    result = _wrapper(
+        docker_image,
+        "compile",
+        "counter.v",
+        environment={"VERILOG_AGENT_INPUT_ROOT": "/repo/tests/unit"},
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["category"] == "PATH_VIOLATION"
+
+
+@pytest.mark.integration
+def test_infinite_simulation_times_out(docker_image: str) -> None:
+    result = _wrapper(
+        docker_image,
+        "simulate",
+        "tb_timeout.v",
+        environment={"VERILOG_AGENT_SIMULATE_TIMEOUT": "1"},
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["category"] == "TIMEOUT"
