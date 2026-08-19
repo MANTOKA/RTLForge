@@ -19,6 +19,7 @@ def test_default_configuration_is_versioned_and_safe() -> None:
     assert config["schema_version"] == 1
     assert config["sandbox"]["network"] == "none"
     assert config["sandbox"]["read_only_root"] is True
+    assert config["sandbox"]["user_uid"] != 0
     assert config["logging"]["format"] == "jsonl"
     assert "api_key" in config["logging"]["redact_keys"]
 

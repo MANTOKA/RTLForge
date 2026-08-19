@@ -4,12 +4,15 @@ VerilogAgent is an experimental multi-agent system for generating, checking, sim
 
 ## Current status
 
-The repository currently contains an EDA sandbox prototype:
+The repository currently contains a restricted EDA sandbox baseline:
 
 - Ubuntu 22.04 Docker image
 - Icarus Verilog compilation and simulation
 - Verilator linting
+- Yosys synthesis statistics
 - structured JSON diagnostics in `tool_wrapper.py`
+- non-root execution, disabled network, read-only root filesystem, resource limits, input
+  path validation, subprocess timeouts, and isolated temporary outputs
 - small counter RTL and testbench fixtures
 
 The hand-written RTL files under `tests/fixtures/` are stable regression inputs. They are
@@ -40,7 +43,12 @@ The current image is a command-line prototype rather than the final web applicat
 Example when mounting the repository into the container:
 
 ```bash
-docker run --rm -v "${PWD}:/workspace" verilog-agent-sandbox \
+docker run --rm --network none --read-only \
+  --tmpfs /work:rw,exec,size=64m,uid=10001,gid=10001,mode=0700 \
+  --pids-limit 128 --memory 512m --cpus 1 \
+  --mount type=bind,source="${PWD}",target=/workspace,readonly \
+  -e VERILOG_AGENT_INPUT_ROOT=/workspace/tests/fixtures \
+  verilog-agent-sandbox \
   python3 /workspace/tool_wrapper.py compile /workspace/tests/fixtures/counter.v
 ```
 
