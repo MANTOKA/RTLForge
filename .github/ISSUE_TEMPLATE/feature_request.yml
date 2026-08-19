@@ -1,0 +1,34 @@
+name: Feature or phase task
+description: Propose a scoped feature, experiment, or project-phase task.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the user-visible or engineering result, not only an implementation idea.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: State what is included and explicitly excluded.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List deterministic checks that prove the work is complete.
+      placeholder: |
+        - [ ] Unit test ...
+        - [ ] Docker integration test ...
+        - [ ] Documentation updated ...
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and rollback
+      description: Note sandbox, security, compatibility, model-cost, or migration risks.

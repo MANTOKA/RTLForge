@@ -1,0 +1,22 @@
+schema_version = 1
+
+[sandbox]
+image = "verilog-agent-sandbox"
+network = "none"
+read_only_root = true
+workdir = "/work"
+memory_mb = 512
+cpus = 1.0
+pids_limit = 128
+
+[tools]
+compile_timeout_seconds = 30
+lint_timeout_seconds = 30
+simulate_timeout_seconds = 60
+benchmark_timeout_seconds = 120
+
+[logging]
+level = "INFO"
+format = "jsonl"
+destination = "stderr"
+redact_keys = ["api_key", "authorization", "token", "password"]
