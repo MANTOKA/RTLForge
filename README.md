@@ -12,7 +12,12 @@ The repository currently contains an EDA sandbox prototype:
 - structured JSON diagnostics in `tool_wrapper.py`
 - small counter RTL and testbench fixtures
 
-The agent orchestration and browser UI are not implemented yet. The empty `agents/`, `config/`, `core/`, and `tools/` directories are placeholders and will only be populated as working vertical slices are added.
+The hand-written RTL files under `tests/fixtures/` are stable regression inputs. They are
+not intended to represent Agent output. Future generated RTL belongs under `runs/<task_id>/`,
+which is excluded from Git.
+
+The agent orchestration and browser UI are not implemented yet. Their package directories
+will be added only when the corresponding working vertical slices are implemented.
 
 ## Intended product
 
@@ -36,7 +41,7 @@ Example when mounting the repository into the container:
 
 ```bash
 docker run --rm -v "${PWD}:/workspace" verilog-agent-sandbox \
-  python3 /workspace/tool_wrapper.py compile /workspace/counter.v
+  python3 /workspace/tool_wrapper.py compile /workspace/tests/fixtures/counter.v
 ```
 
 ## Planned milestones
@@ -48,9 +53,32 @@ docker run --rm -v "${PWD}:/workspace" verilog-agent-sandbox \
 5. Package the complete stack with Docker Compose and document one-command startup.
 6. Add benchmark regression tests and reproducible evaluation reports.
 
+## Tests
+
+Install the development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Run the fast parser unit tests:
+
+```bash
+pytest
+```
+
+Run the Docker EDA regression suite, which automatically builds the sandbox image and
+calls `tool_wrapper.py` for compile, lint, and simulation checks:
+
+```bash
+pytest --run-integration -m integration
+```
+
+The same commands run automatically in GitHub Actions for pull requests and pushes to
+`main`.
+
 ## Repository policy
 
 - Generated binaries, waveforms, logs, run directories, secrets, and local virtual environments are not committed.
 - LLM credentials must be supplied at runtime through environment variables or local secret files.
 - Each milestone should remain runnable and should be developed on a branch through a pull request.
-

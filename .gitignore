@@ -13,6 +13,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+*.egg-info/
 
 # EDA build products and waveforms
 a.out
@@ -31,4 +32,3 @@ runs/
 .vscode/
 .DS_Store
 Thumbs.db
-

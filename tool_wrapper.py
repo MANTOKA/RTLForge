@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
-import sys
-import subprocess
-import re
 import json
-import os
+import re
+import subprocess
+import sys
 
 # ===============================
 # Error Parser (错误解析器)

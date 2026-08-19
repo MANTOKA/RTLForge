@@ -7,10 +7,10 @@ __pycache__
 .pytest_cache
 .venv
 venv
+*.egg-info
 a.out
 sim.out
 *.vcd
 *.fst
 obj_dir
 runs
-
