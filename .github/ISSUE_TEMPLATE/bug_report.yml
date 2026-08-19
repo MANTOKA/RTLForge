@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible defect in the wrapper, sandbox, agents, API, or UI.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove secrets and include the smallest reproducible RTL example.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include the command, input files, and relevant configuration.
+      placeholder: |
+        1. Run ...
+        2. Provide ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Paste ToolResult JSON, logs, or CI links with credentials removed.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Git commit or release tag, for example v0.0.1-prototype.
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Windows host with Docker Desktop
+        - Linux host with Docker Engine
+        - GitHub Actions
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed API keys, tokens, private RTL, and other secrets.
+          required: true

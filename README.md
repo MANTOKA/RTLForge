@@ -77,6 +77,10 @@ pytest --run-integration -m integration
 The same commands run automatically in GitHub Actions for pull requests and pushes to
 `main`.
 
+Repository configuration, logging, generated-artifact, and contribution conventions are
+defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in
+[`config/default.toml`](config/default.toml); credentials never belong in that file.
+
 ## Repository policy
 
 - Generated binaries, waveforms, logs, run directories, secrets, and local virtual environments are not committed.
