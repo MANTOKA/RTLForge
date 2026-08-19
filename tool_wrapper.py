@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,20 @@ VERILATOR_RE = re.compile(
 )
 
 SUPPORTED_SUFFIXES = {".v", ".sv", ".vh", ".svh"}
+SCHEMA_VERSION = 1
+FAILURE_TEXT_RE = re.compile(
+    r"(?:\bFAIL(?:ED|URE)?\b|\bFATAL\b|ASSERT(?:ION)?.*(?:FAIL|ERROR))",
+    re.IGNORECASE,
+)
+ZERO_FAILURE_COUNT_RE = re.compile(
+    r"(?:\bFAIL(?:ED|URES?)?\s*[:=]\s*0\b|\b0\s+FAILURES?\b)",
+    re.IGNORECASE,
+)
+YOSYS_METRICS = {
+    "wire_count": re.compile(r"Number of wires:\s+(\d+)"),
+    "wire_bits": re.compile(r"Number of wire bits:\s+(\d+)"),
+    "cell_count": re.compile(r"Number of cells:\s+(\d+)"),
+}
 
 
 def parse_iverilog(stderr: str) -> list[dict[str, Any]]:
@@ -41,6 +56,7 @@ def parse_iverilog(stderr: str) -> list[dict[str, Any]]:
         errors.append(
             {
                 "tool": "iverilog",
+                "severity": (data["severity"] or "ERROR").upper(),
                 "type": (data["severity"] or "ERROR").upper(),
                 "file": data["file"],
                 "line": int(data["line"]),
@@ -61,6 +77,7 @@ def parse_verilator(stderr: str) -> list[dict[str, Any]]:
         errors.append(
             {
                 "tool": "verilator",
+                "severity": data["severity"].upper(),
                 "type": data["code"] or data["severity"].upper(),
                 "file": data["file"],
                 "line": int(data["line"]),
@@ -95,8 +112,14 @@ def _output_text(value: str | bytes | None) -> str:
     return value
 
 
+def contains_failure_marker(output: str) -> bool:
+    normalized = ZERO_FAILURE_COUNT_RE.sub("", output)
+    return FAILURE_TEXT_RE.search(normalized) is not None
+
+
 def run_command(cmd: list[str], *, timeout_seconds: int) -> dict[str, Any]:
     """Run an EDA subprocess with bounded time and structured system failures."""
+    started = time.perf_counter()
     try:
         result = subprocess.run(
             cmd,
@@ -111,6 +134,7 @@ def run_command(cmd: list[str], *, timeout_seconds: int) -> dict[str, Any]:
             "stderr": result.stderr,
             "timed_out": False,
             "system_error": None,
+            "duration_ms": round((time.perf_counter() - started) * 1000),
         }
     except subprocess.TimeoutExpired as error:
         return {
@@ -119,6 +143,7 @@ def run_command(cmd: list[str], *, timeout_seconds: int) -> dict[str, Any]:
             "stderr": _output_text(error.stderr),
             "timed_out": True,
             "system_error": None,
+            "duration_ms": round((time.perf_counter() - started) * 1000),
         }
     except OSError as error:
         return {
@@ -127,6 +152,7 @@ def run_command(cmd: list[str], *, timeout_seconds: int) -> dict[str, Any]:
             "stderr": str(error),
             "timed_out": False,
             "system_error": str(error),
+            "duration_ms": round((time.perf_counter() - started) * 1000),
         }
 
 
@@ -136,14 +162,30 @@ def _result(
     category: str,
     command_result: dict[str, Any] | None = None,
     *,
+    tool: str | None = None,
     errors: list[dict[str, Any]] | None = None,
+    metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     command_result = command_result or {}
+    action_by_stage = {
+        "COMPILE": "compile",
+        "LINT": "lint",
+        "SIMULATION": "simulate",
+        "QUALITY": "eval_quality",
+        "BENCHMARK": "benchmark",
+        "INPUT": "input",
+    }
     return {
+        "schema_version": SCHEMA_VERSION,
+        "action": action_by_stage[stage],
         "stage": stage,
         "status": status,
         "category": category,
+        "tool": tool,
+        "returncode": command_result.get("returncode"),
+        "duration_ms": command_result.get("duration_ms", 0),
         "errors": errors or [],
+        "metrics": metrics or {},
         "stdout": command_result.get("stdout", ""),
         "stderr": command_result.get("stderr", ""),
     }
@@ -156,18 +198,19 @@ def _classify_command_failure(
     default_category: str,
 ) -> dict[str, Any]:
     if result["timed_out"]:
-        return _result(stage, "FAIL", "TIMEOUT", result)
+        return _result(stage, "FAIL", "TIMEOUT", result, tool=tool)
     if result["system_error"]:
-        return _result(stage, "FAIL", "SYSTEM_ERROR", result)
+        return _result(stage, "FAIL", "SYSTEM_ERROR", result, tool=tool)
     if result["returncode"] != 0:
         return _result(
             stage,
             "FAIL",
             default_category,
             result,
+            tool=tool,
             errors=parse_error(tool, result["stderr"]),
         )
-    return _result(stage, "PASS", "OK", result)
+    return _result(stage, "PASS", "OK", result, tool=tool)
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -242,8 +285,102 @@ def simulate(files: list[str]) -> dict[str, Any]:
             ["vvp", output],
             timeout_seconds=_timeout("simulate", 60),
         )
-    return _classify_command_failure(
-        "SIMULATION", simulation_result, "iverilog", "SIMULATION_ERROR"
+    classified = _classify_command_failure(
+        "SIMULATION", simulation_result, "vvp", "SIMULATION_ERROR"
+    )
+    combined_output = simulation_result["stdout"] + "\n" + simulation_result["stderr"]
+    if classified["status"] == "PASS" and contains_failure_marker(combined_output):
+        return _result(
+            "SIMULATION",
+            "FAIL",
+            "ASSERTION_FAILURE",
+            simulation_result,
+            tool="vvp",
+            errors=[
+                {
+                    "tool": "vvp",
+                    "severity": "ERROR",
+                    "type": "ASSERTION_FAILURE",
+                    "file": None,
+                    "line": None,
+                    "message": "Simulation output contains an assertion or FAIL marker",
+                }
+            ],
+        )
+    return classified
+
+
+def eval_quality(files: list[str]) -> dict[str, Any]:
+    result = run_command(
+        ["verilator", "--lint-only", "-Wall", "--Wno-fatal", *files],
+        timeout_seconds=_timeout("lint", 30),
+    )
+    if result["timed_out"] or result["system_error"]:
+        return _classify_command_failure("QUALITY", result, "verilator", "QUALITY_ERROR")
+
+    diagnostics = parse_verilator(result["stderr"])
+    error_count = sum(item["severity"] == "ERROR" for item in diagnostics)
+    warning_count = sum(item["severity"] == "WARNING" for item in diagnostics)
+    score = max(0, 100 - error_count * 25 - warning_count * 5)
+    metrics = {
+        "score": score,
+        "error_count": error_count,
+        "warning_count": warning_count,
+    }
+    if result["returncode"] != 0 or error_count:
+        return _result(
+            "QUALITY",
+            "FAIL",
+            "QUALITY_ERROR",
+            result,
+            tool="verilator",
+            errors=diagnostics,
+            metrics=metrics,
+        )
+    return _result(
+        "QUALITY",
+        "PASS",
+        "OK",
+        result,
+        tool="verilator",
+        errors=diagnostics,
+        metrics=metrics,
+    )
+
+
+def _yosys_quote(path: str) -> str:
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def benchmark(files: list[str]) -> dict[str, Any]:
+    with _workspace() as workspace:
+        script_path = Path(workspace) / "benchmark.ys"
+        inputs = " ".join(_yosys_quote(path) for path in files)
+        script_path.write_text(
+            f"read_verilog -sv {inputs}\n"
+            "hierarchy -auto-top\n"
+            "proc\n"
+            "opt\n"
+            "stat\n",
+            encoding="utf-8",
+        )
+        result = run_command(
+            ["yosys", "-s", str(script_path)],
+            timeout_seconds=_timeout("benchmark", 120),
+        )
+
+    if result["timed_out"] or result["system_error"] or result["returncode"] != 0:
+        return _classify_command_failure(
+            "BENCHMARK", result, "yosys", "SYNTHESIS_ERROR"
+        )
+
+    metrics = {
+        name: int(match.group(1)) if (match := pattern.search(result["stdout"])) else None
+        for name, pattern in YOSYS_METRICS.items()
+    }
+    metrics["scope"] = "structural_only_no_sta"
+    return _result(
+        "BENCHMARK", "PASS", "OK", result, tool="yosys", metrics=metrics
     )
 
 
@@ -256,6 +393,8 @@ def dispatch(mode: str, files: list[str]) -> dict[str, Any]:
         "compile": compile_verilog,
         "lint": lint_verilog,
         "simulate": simulate,
+        "eval_quality": eval_quality,
+        "benchmark": benchmark,
     }
     action = actions.get(mode)
     if action is None:
@@ -271,7 +410,12 @@ def main() -> None:
             "INPUT",
             "FAIL",
             "INVALID_ARGUMENT",
-            {"stderr": "Usage: tool_wrapper.py [compile|lint|simulate] file.v"},
+            {
+                "stderr": (
+                    "Usage: tool_wrapper.py "
+                    "[compile|lint|simulate|eval_quality|benchmark] file.v"
+                )
+            },
         )
     else:
         result = dispatch(sys.argv[1], sys.argv[2:])

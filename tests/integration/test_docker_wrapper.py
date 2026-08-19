@@ -111,6 +111,20 @@ def test_valid_counter_compiles(docker_image: str) -> None:
 
     assert result["status"] == "PASS"
     assert result["errors"] == []
+    assert {
+        "schema_version",
+        "action",
+        "stage",
+        "status",
+        "category",
+        "tool",
+        "returncode",
+        "duration_ms",
+        "errors",
+        "metrics",
+        "stdout",
+        "stderr",
+    } <= result.keys()
 
 
 @pytest.mark.integration
@@ -188,3 +202,35 @@ def test_infinite_simulation_times_out(docker_image: str) -> None:
 
     assert result["status"] == "FAIL"
     assert result["category"] == "TIMEOUT"
+
+
+@pytest.mark.integration
+def test_zero_exit_fail_text_is_not_treated_as_pass(docker_image: str) -> None:
+    result = _wrapper(docker_image, "simulate", "tb_fail_text.v")
+
+    assert result["status"] == "FAIL"
+    assert result["category"] == "ASSERTION_FAILURE"
+
+
+@pytest.mark.integration
+def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> None:
+    result = _wrapper(docker_image, "eval_quality", "counter.v")
+
+    assert result["status"] == "PASS"
+    assert result["metrics"] == {
+        "score": 100,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+@pytest.mark.integration
+def test_yosys_benchmark_returns_structural_metrics(docker_image: str) -> None:
+    result = _wrapper(docker_image, "benchmark", "counter.v")
+
+    assert result["status"] == "PASS"
+    assert result["tool"] == "yosys"
+    assert result["metrics"]["wire_count"] > 0
+    assert result["metrics"]["wire_bits"] > 0
+    assert result["metrics"]["cell_count"] > 0
+    assert result["metrics"]["scope"] == "structural_only_no_sta"

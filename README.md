@@ -38,7 +38,10 @@ Build the current image from this directory:
 docker build -t verilog-agent-sandbox .
 ```
 
-The current image is a command-line prototype rather than the final web application. Tool calls accept one of `compile`, `lint`, or `simulate`, followed by one or more Verilog files.
+The current image is a command-line prototype rather than the final web application. Tool
+calls accept `compile`, `lint`, `simulate`, `eval_quality`, or `benchmark`, followed by one
+or more Verilog files. All actions return the same versioned JSON contract documented in
+[`docs/TOOL_INTERFACE.md`](docs/TOOL_INTERFACE.md).
 
 Example when mounting the repository into the container:
 
