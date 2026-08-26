@@ -103,7 +103,9 @@ The same commands run automatically in GitHub Actions for pull requests and push
 Unit and CI tests use `ScriptedProvider`; they never call a model endpoint and do not consume
 API tokens. Run `python -m verilog_agent.agents.demo --offline-example` to inspect the complete
 display format without an API. Running the same module without `--offline-example` is the
-explicit live-model path.
+explicit live-model path. Live mode automatically loads an ignored local `.env`; use
+`--check-config` to display the effective non-secret endpoint and model without making an API
+call. See [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
 
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in

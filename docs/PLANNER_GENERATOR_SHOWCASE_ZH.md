@@ -50,17 +50,49 @@ verified_rtl: false
 
 ## 3. 配置真实模型
 
-不要把真实 Key 发到聊天、GitHub Issue 或提交到仓库。在你自己的 PowerShell 窗口临时设置：
+不要把真实 Key 写入 `demo.py`、发到聊天、GitHub Issue 或提交到仓库。推荐在仓库根目录
+建立一个只保存在本机的 `.env`：
 
 ```powershell
-$env:OPENAI_API_KEY = "替换为你的API-Key"
-$env:VERILOG_AGENT_MODEL = "替换为你账户可用的模型ID"
-
-# 只有使用其他兼容服务时才设置：
-# $env:OPENAI_BASE_URL = "https://兼容服务地址/v1"
+Copy-Item .env.example .env
+notepad .env
 ```
 
-环境变量只对当前 PowerShell 窗口有效。项目不会把 Key 写入 `runs/`、数据库或报告。
+把 `.env` 编辑为：
+
+```dotenv
+OPENAI_API_KEY=替换为你的Key
+VERILOG_AGENT_MODEL=替换为服务商提供的模型ID
+OPENAI_BASE_URL=https://中转服务的基础地址/v1
+```
+
+`.env` 已被 `.gitignore` 忽略。真实演示会自动读取当前目录的 `.env`，但不会覆盖已经在
+PowerShell 中设置的同名变量，也不会把 Key 写入 `runs/`、数据库或报告。不要修改并填写
+`.env.example`，因为它是会被 Git 管理的公开模板。
+
+中转平台的连接信息应这样理解：
+
+| 中转字段 | 本项目配置 | 说明 |
+|---|---|---|
+| `key` | `OPENAI_API_KEY` | 只写入本机 `.env` |
+| `url` | `OPENAI_BASE_URL` | 填基础地址；若给的是完整 `/responses` 地址，应去掉末尾 `/responses` |
+| `type` | 不直接填写 | 用来判断接口兼容性，当前必须是 OpenAI Responses API 兼容类型 |
+| 模型 ID | `VERILOG_AGENT_MODEL` | `type/key/url` 不能代替模型 ID，需向服务商查询 |
+
+当前代码最终请求 `POST <OPENAI_BASE_URL>/responses`。若中转只支持
+`POST .../chat/completions`，或者 `type` 是 Azure、Anthropic、Gemini，则不能直接使用当前
+适配器，需要另加对应 Provider。仅写着“OpenAI compatible”也不一定包含 Responses API，
+应查看中转平台文档或先询问其客服。
+
+配置后可先执行不联网、不消耗额度的检查：
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --check-config
+```
+
+它只显示模型、基础 URL、预期的 `/responses` 地址和 `api_key: configured (value hidden)`，
+绝不会显示 Key。若 `.env` 放在其他位置，可使用
+`--env-file D:\path\to\private.env`。
 
 ## 4. 手动输入需求并观察真实 Planner/Generator
 

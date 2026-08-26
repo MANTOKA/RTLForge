@@ -25,8 +25,8 @@ being silently accepted.
 ## Provider and secrets
 
 The first provider uses the OpenAI Python SDK and Responses API. It sends a strict JSON Schema,
-sets `store=false`, accepts an optional `OPENAI_BASE_URL`, and reads credentials only from the
-environment. A compatible custom endpoint must implement the Responses API and strict JSON
+sets `store=false`, accepts an optional `OPENAI_BASE_URL`, and reads credentials from the process
+environment after optionally loading an ignored local `.env`. A compatible custom endpoint must implement the Responses API and strict JSON
 Schema output; an endpoint that implements only Chat Completions is not supported in this slice.
 The request shape follows the official
 [Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create)
@@ -38,17 +38,23 @@ Install the optional dependency from the repository root:
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,llm]"
 ```
 
-Set configuration for the current PowerShell window. Replace both example values:
+Create the ignored local configuration once:
 
 ```powershell
-$env:OPENAI_API_KEY = "your-key"
-$env:VERILOG_AGENT_MODEL = "your-model-id"
-# Optional for a compatible provider:
-# $env:OPENAI_BASE_URL = "https://provider.example/v1"
+Copy-Item .env.example .env
+notepad .env
 ```
 
-Do not paste the real key into `.env.example`, Git, an Issue, a screenshot, or chat. Closing the
-PowerShell window removes these temporary environment variables.
+Set `OPENAI_API_KEY`, `VERILOG_AGENT_MODEL`, and, for a compatible relay,
+`OPENAI_BASE_URL` in `.env`. The relay URL must be a base URL such as
+`https://provider.example/v1`, not the full `/responses` endpoint. Values already present in the
+shell take precedence. Validate the effective non-secret configuration without an API call:
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --check-config
+```
+
+Do not paste the real key into `.env.example`, Git, an Issue, a screenshot, or chat.
 
 ## Safe offline verification
 
