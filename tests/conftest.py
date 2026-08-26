@@ -18,6 +18,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
     skip_integration = pytest.mark.skip(reason="use --run-integration to run Docker tests")
     for item in items:
-        if "integration" in item.keywords:
+        if item.get_closest_marker("integration") is not None:
             item.add_marker(skip_integration)
 

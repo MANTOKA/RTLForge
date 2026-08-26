@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "verilog-agent"
-version = "0.0.1"
+version = "0.2.0"
 description = "Lightweight multi-agent RTL generation, verification, and repair system"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,8 +21,11 @@ dev = [
 [tool.setuptools]
 py-modules = ["tool_wrapper"]
 
+[tool.setuptools.packages.find]
+include = ["verilog_agent*"]
+
 [tool.pytest.ini_options]
-addopts = "-ra -p no:cacheprovider"
+addopts = "-ra -p no:cacheprovider --basetemp=.pytest_tmp"
 testpaths = ["tests"]
 markers = [
     "integration: requires a running Docker engine and builds the sandbox image",
