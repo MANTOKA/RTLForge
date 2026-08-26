@@ -18,6 +18,12 @@ lint_timeout_seconds = 30
 simulate_timeout_seconds = 60
 benchmark_timeout_seconds = 120
 
+[orchestration]
+domain_schema_version = 1
+max_candidates = 2
+max_repairs = 3
+checkpoint_every_transition = true
+
 [logging]
 level = "INFO"
 format = "jsonl"

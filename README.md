@@ -19,8 +19,10 @@ The hand-written RTL files under `tests/fixtures/` are stable regression inputs.
 not intended to represent Agent output. Future generated RTL belongs under `runs/<task_id>/`,
 which is excluded from Git.
 
-The agent orchestration and browser UI are not implemented yet. Their package directories
-will be added only when the corresponding working vertical slices are implemented.
+The Phase 2 orchestration baseline now includes versioned domain models, an explicit task
+state machine, SQLite events/checkpoints, budgets, cancellation, and deterministic Fake
+Planner/Generator/Debugger implementations. Real model providers and the browser UI are not
+implemented yet. See [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md).
 
 ## Intended product
 
