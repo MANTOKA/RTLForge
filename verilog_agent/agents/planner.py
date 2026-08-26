@@ -99,6 +99,7 @@ testable acceptance criteria, and a small task tree. Do not generate Verilog or 
 Do not silently turn an ambiguity into a fact: record any chosen interpretation in assumptions.
 Use only simple Verilog identifiers for the module and ports. A width is a positive bit count.
 clock and reset must be null when absent, otherwise they must name declared input ports.
+Write titles, descriptions, assumptions, and acceptance criteria in the user's language.
 The root's children are concrete implementation or verification tasks."""
 
 

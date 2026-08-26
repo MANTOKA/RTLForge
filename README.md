@@ -25,7 +25,8 @@ real model-backed Planner and Generator implementations. The real agents use an
 OpenAI-compatible Responses endpoint with strict structured output. The Debugger, deterministic
 candidate evaluation/verification services, and browser UI are later slices. See
 [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
-[`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md).
+[`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md). A step-by-step Chinese demonstration guide is
+available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
 
 ## Intended product
 
@@ -100,7 +101,9 @@ The same commands run automatically in GitHub Actions for pull requests and push
 `main`.
 
 Unit and CI tests use `ScriptedProvider`; they never call a model endpoint and do not consume
-API tokens. Running `python -m verilog_agent.agents.demo ...` is the explicit live-model path.
+API tokens. Run `python -m verilog_agent.agents.demo --offline-example` to inspect the complete
+display format without an API. Running the same module without `--offline-example` is the
+explicit live-model path.
 
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.unit.test_real_agents import candidate_payload, plan_payload
 from verilog_agent.agents import ArtifactRepository, RealGenerator, RealPlanner
 from verilog_agent.domain import TaskStage
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
@@ -11,11 +10,13 @@ from verilog_agent.testing import (
     FakeEvaluator,
     FakeVerifier,
     ScriptedProvider,
+    counter_candidate_payload,
+    counter_plan_payload,
 )
 
 
 def test_real_agent_classes_complete_offline_scripted_loop(tmp_path: Path) -> None:
-    provider = ScriptedProvider(plan_payload(), candidate_payload())
+    provider = ScriptedProvider(counter_plan_payload(), counter_candidate_payload())
     store = SQLiteTaskStore(tmp_path / "real-agents.sqlite")
     orchestrator = Orchestrator(
         planner=RealPlanner(provider),

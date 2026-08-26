@@ -59,20 +59,32 @@ validation, artifact writing, hashing, and the Orchestrator loop without network
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## Explicit live-model smoke run
-
-The following command is the only current path that actually calls the configured model and may
-consume paid API tokens:
+To see the actual Planner/Generator display rather than only the test count, run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
-  "Create a four-bit synchronous active-high reset counter named counter with clk, rst, and q"
+.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --offline-example
 ```
 
-The final JSON contains the task record and artifact paths. Generated files appear under
-`runs/<task_id>/candidates/cand_01/rtl.v` and `cand_02/rtl.v`; `runs/` is ignored by Git.
+This uses a fixed, clearly labeled scripted counter response. It displays the same SpecIR,
+Task Tree, candidate RTL, hashes, event sequence, and saved files as live mode, but it does not
+prove that an LLM understood new text. See the Chinese walkthrough in
+[`PLANNER_GENERATOR_SHOWCASE_ZH.md`](PLANNER_GENERATOR_SHOWCASE_ZH.md).
 
-Important: this command proves real planning and generation, not final RTL correctness. Its
-Evaluator and Verifier are still deterministic test doubles. Phase 2 Weeks 6-7 will connect the
-static scorer, EDA verification, failure router, and real Debugger before a generated candidate
-can be labeled verified RTL.
+## Explicit live-model smoke run
+
+The following command prompts for a requirement, calls the configured model twice (Planner and
+Generator), and may consume paid API tokens:
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.agents.demo
+```
+
+You can also pass the requirement in quotes after `demo`. The command prints each stage and
+saves `input.txt`, `spec_ir.json`, `task_tree.json`, `showcase_summary.json`, and candidate RTL
+under `runs/<task_id>/`; `runs/` is ignored by Git.
+
+Important: this command proves real planning and generation, not final RTL correctness. It now
+stops at `EVALUATING` immediately after generation and does not invoke a Fake Evaluator or Fake
+Verifier. The report says `verified_rtl=false`. Phase 2 Weeks 6-7 will connect the static scorer,
+EDA verification, failure router, and real Debugger before a generated candidate can be labeled
+verified RTL.
