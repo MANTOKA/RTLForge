@@ -18,6 +18,8 @@ Schema；只有 Chat Completions 接口的服务目前不能直接使用。
 
 Codex、ChatGPT 或 GitHub 的登录状态不会自动成为这个 Python 项目的 API Key。真实模式需要
 单独配置 `OPENAI_API_KEY` 和 `VERILOG_AGENT_MODEL`。
+OpenAI Key 的创建和 PowerShell 环境变量设置可参考
+[OpenAI Developer Quickstart](https://developers.openai.com/api/docs/quickstart)。
 
 ## 2. 先运行完全免费的离线展示
 
