@@ -37,3 +37,12 @@ by Git. Tests should assert structured fields rather than compare unstable prose
 
 Every implementation change starts from an Issue, uses a short-lived branch, includes the
 relevant tests and documentation, and enters `main` through a pull request with passing CI.
+
+## Model-provider environment
+
+The real Planner and Generator read `OPENAI_API_KEY` and `VERILOG_AGENT_MODEL` at runtime.
+`OPENAI_BASE_URL` may point to another endpoint that implements the OpenAI Responses API and
+strict JSON Schema output. Timeouts, output limits, and SDK retries can be overridden with
+`VERILOG_AGENT_REQUEST_TIMEOUT_SECONDS`, `VERILOG_AGENT_MAX_OUTPUT_TOKENS`, and
+`VERILOG_AGENT_MAX_RETRIES`. The API key is excluded from object representations and model
+responses are requested with `store=false`; it must still never be placed in a committed file.

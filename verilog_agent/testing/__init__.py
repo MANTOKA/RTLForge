@@ -7,6 +7,7 @@ from verilog_agent.testing.fakes import (
     FakePlanner,
     FakeVerifier,
 )
+from verilog_agent.testing.scripted_provider import ScriptedProvider
 
 __all__ = [
     "FakeDebugger",
@@ -14,4 +15,5 @@ __all__ = [
     "FakeGenerator",
     "FakePlanner",
     "FakeVerifier",
+    "ScriptedProvider",
 ]

@@ -24,6 +24,14 @@ max_candidates = 2
 max_repairs = 3
 checkpoint_every_transition = true
 
+[model]
+provider = "openai_responses"
+model = ""
+base_url = ""
+request_timeout_seconds = 120
+max_output_tokens = 8192
+max_retries = 2
+
 [logging]
 level = "INFO"
 format = "jsonl"
