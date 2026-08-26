@@ -6,7 +6,11 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from verilog_agent.agents.validation import AgentOutputError, require_string_list
+from verilog_agent.agents.validation import (
+    AgentOutputError,
+    require_string_list,
+    require_verilog_identifier,
+)
 from verilog_agent.domain.models import Candidate, RTLTaskContext
 from verilog_agent.providers.base import StructuredModelProvider
 
@@ -17,7 +21,8 @@ Generate complete, synthesizable Verilog-2005 modules that exactly implement the
 SpecIR and declared module interface. Return plain RTL inside the JSON field, never Markdown
 fences. Do not invent or change ports, the module name, the specification, tests, or oracle.
 Candidates must be functionally equivalent but use a stated, controlled structural difference.
-Do not call tools or include a testbench. Use explicit widths and synthesizable constructs."""
+Write design_pattern and assumptions in the user's language from SpecIR. Do not call tools or
+include a testbench. Use explicit widths and synthesizable constructs."""
 
 
 class ArtifactRepository:
@@ -26,11 +31,24 @@ class ArtifactRepository:
     def __init__(self, root: Path | str = Path("runs")) -> None:
         self.root = Path(root)
 
-    def write_candidate(self, task_id: str, candidate_id: str, rtl: str) -> Path:
+    def write_candidate(
+        self,
+        task_id: str,
+        candidate_id: str,
+        module_name: str,
+        rtl: str,
+    ) -> Path:
         for field_name, value in (("task_id", task_id), ("candidate_id", candidate_id)):
             if _SAFE_PATH_SEGMENT.fullmatch(value) is None or value in {".", ".."}:
                 raise AgentOutputError(f"unsafe {field_name}: {value!r}")
-        destination = self.root / task_id / "candidates" / candidate_id / "rtl.v"
+        safe_module_name = require_verilog_identifier(module_name, "module_name")
+        destination = (
+            self.root
+            / task_id
+            / "candidates"
+            / candidate_id
+            / f"{safe_module_name}.v"
+        )
         root = self.root.resolve()
         resolved = destination.resolve()
         if root not in resolved.parents:
@@ -102,7 +120,12 @@ class RealGenerator:
         candidates = []
         for index, (rtl, design_pattern, assumptions, digest) in enumerate(prepared, start=1):
             candidate_id = f"cand_{index:02d}"
-            path = self.artifacts.write_candidate(context.task_id, candidate_id, rtl)
+            path = self.artifacts.write_candidate(
+                context.task_id,
+                candidate_id,
+                context.spec_ir.module_name,
+                rtl,
+            )
             candidates.append(
                 Candidate(
                     candidate_id=candidate_id,

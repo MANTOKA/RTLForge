@@ -55,13 +55,16 @@ class FakePlanner:
 class FakeGenerator:
     def generate(self, context: RTLTaskContext, candidate_count: int) -> list[Candidate]:
         candidates = []
+        module_name = context.spec_ir.module_name if context.spec_ir else "rtl"
         for index in range(1, candidate_count + 1):
             candidate_id = f"cand_{index:02d}"
             digest = sha256(f"{context.task_id}:{candidate_id}".encode()).hexdigest()
             candidates.append(
                 Candidate(
                     candidate_id=candidate_id,
-                    artifact_path=f"runs/{context.task_id}/candidates/{candidate_id}/rtl.v",
+                    artifact_path=(
+                        f"runs/{context.task_id}/candidates/{candidate_id}/{module_name}.v"
+                    ),
                     code_hash=digest,
                     design_pattern="single-process" if index == 1 else "split-control-data",
                 )
@@ -118,7 +121,10 @@ class FakeDebugger:
         ).hexdigest()
         return Candidate(
             candidate_id=candidate_id,
-            artifact_path=f"runs/{context.task_id}/candidates/{candidate_id}/rtl.v",
+            artifact_path=(
+                f"runs/{context.task_id}/candidates/{candidate_id}/"
+                f"{context.spec_ir.module_name if context.spec_ir else 'rtl'}.v"
+            ),
             code_hash=digest,
             parent_id=candidate.candidate_id,
             generation=candidate.generation + 1,

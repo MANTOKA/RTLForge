@@ -13,42 +13,11 @@ from verilog_agent.domain import (
     SpecIR,
     TaskTreeNode,
 )
-from verilog_agent.testing import ScriptedProvider
-
-
-def plan_payload() -> dict:
-    return {
-        "module_name": "counter",
-        "ports": [
-            {"name": "clk", "direction": "input", "width": 1},
-            {"name": "rst", "direction": "input", "width": 1},
-            {"name": "q", "direction": "output", "width": 4},
-        ],
-        "clock": "clk",
-        "reset": "rst",
-        "assumptions": ["synchronous active-high reset"],
-        "acceptance_criteria": ["reset clears q", "q increments on each clock"],
-        "task_tree_root": {
-            "node_id": "root",
-            "title": "Implement counter",
-            "description": "Build and verify a four-bit counter",
-            "acceptance_criteria": ["all behavior is verified"],
-            "children": [
-                {
-                    "node_id": "rtl",
-                    "title": "Generate RTL",
-                    "description": "Generate synthesizable counter RTL",
-                    "acceptance_criteria": ["module compiles"],
-                },
-                {
-                    "node_id": "verify",
-                    "title": "Verify behavior",
-                    "description": "Check reset and increment behavior",
-                    "acceptance_criteria": ["counter behavior passes"],
-                },
-            ],
-        },
-    }
+from verilog_agent.testing import (
+    ScriptedProvider,
+    counter_candidate_payload,
+    counter_plan_payload,
+)
 
 
 def planned_context(task_id: str = "task_counter") -> RTLTaskContext:
@@ -81,36 +50,8 @@ def planned_context(task_id: str = "task_counter") -> RTLTaskContext:
     )
 
 
-def candidate_payload() -> dict:
-    return {
-        "candidates": [
-            {
-                "rtl": (
-                    "module counter(input clk, input rst, output reg [3:0] q);\n"
-                    "always @(posedge clk) begin\n"
-                    "  if (rst) q <= 4'b0; else q <= q + 4'b1;\n"
-                    "end\nendmodule"
-                ),
-                "design_pattern": "single sequential process",
-                "assumptions": ["synchronous active-high reset"],
-            },
-            {
-                "rtl": (
-                    "module counter(input clk, input rst, output reg [3:0] q);\n"
-                    "wire [3:0] next_q = q + 4'b1;\n"
-                    "always @(posedge clk) begin\n"
-                    "  if (rst) q <= 4'b0; else q <= next_q;\n"
-                    "end\nendmodule"
-                ),
-                "design_pattern": "explicit next-value datapath",
-                "assumptions": ["synchronous active-high reset"],
-            },
-        ]
-    }
-
-
 def test_real_planner_builds_valid_domain_plan() -> None:
-    provider = ScriptedProvider(plan_payload())
+    provider = ScriptedProvider(counter_plan_payload())
     context = RTLTaskContext(task_id="task_plan", raw_spec="Create a four-bit counter")
 
     result = RealPlanner(provider).plan(context)
@@ -124,7 +65,7 @@ def test_real_planner_builds_valid_domain_plan() -> None:
 
 
 def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
-    payload = plan_payload()
+    payload = counter_plan_payload()
     payload["clock"] = "q"
 
     with pytest.raises(AgentOutputError, match="clock must name a declared input"):
@@ -134,7 +75,7 @@ def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
 
 
 def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> None:
-    provider = ScriptedProvider(candidate_payload())
+    provider = ScriptedProvider(counter_candidate_payload())
     generator = RealGenerator(provider, artifacts=ArtifactRepository(tmp_path / "runs"))
 
     candidates = generator.generate(planned_context(), 2)
@@ -144,6 +85,7 @@ def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> Non
     for candidate in candidates:
         path = Path(candidate.artifact_path)
         assert path.is_file()
+        assert path.name == "counter.v"
         assert candidate.code_hash == sha256(path.read_bytes()).hexdigest()
     schema = provider.requests[0]["schema"]
     assert schema["properties"]["candidates"]["minItems"] == 2
@@ -151,7 +93,7 @@ def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> Non
 
 
 def test_real_generator_rejects_duplicates_before_writing(tmp_path: Path) -> None:
-    payload = candidate_payload()
+    payload = counter_candidate_payload()
     payload["candidates"][1]["rtl"] = payload["candidates"][0]["rtl"]
     generator = RealGenerator(
         ScriptedProvider(payload), artifacts=ArtifactRepository(tmp_path / "runs")
@@ -165,7 +107,7 @@ def test_real_generator_rejects_duplicates_before_writing(tmp_path: Path) -> Non
 
 def test_artifact_repository_rejects_unsafe_task_path(tmp_path: Path) -> None:
     generator = RealGenerator(
-        ScriptedProvider(candidate_payload()),
+        ScriptedProvider(counter_candidate_payload()),
         artifacts=ArtifactRepository(tmp_path / "runs"),
     )
 
