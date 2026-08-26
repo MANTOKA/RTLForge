@@ -19,10 +19,13 @@ The hand-written RTL files under `tests/fixtures/` are stable regression inputs.
 not intended to represent Agent output. Future generated RTL belongs under `runs/<task_id>/`,
 which is excluded from Git.
 
-The Phase 2 orchestration baseline now includes versioned domain models, an explicit task
-state machine, SQLite events/checkpoints, budgets, cancellation, and deterministic Fake
-Planner/Generator/Debugger implementations. Real model providers and the browser UI are not
-implemented yet. See [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md).
+The Phase 2 implementation now includes versioned domain models, an explicit task state
+machine, SQLite events/checkpoints, budgets, cancellation, deterministic Fake Agents, and
+real model-backed Planner and Generator implementations. The real agents use an
+OpenAI-compatible Responses endpoint with strict structured output. The Debugger, deterministic
+candidate evaluation/verification services, and browser UI are later slices. See
+[`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
+[`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md).
 
 ## Intended product
 
@@ -74,6 +77,12 @@ Install the development dependencies:
 python -m pip install -e ".[dev]"
 ```
 
+Install the optional model-provider dependency when you want to call a real model:
+
+```bash
+python -m pip install -e ".[dev,llm]"
+```
+
 Run the fast parser unit tests:
 
 ```bash
@@ -89,6 +98,9 @@ pytest --run-integration -m integration
 
 The same commands run automatically in GitHub Actions for pull requests and pushes to
 `main`.
+
+Unit and CI tests use `ScriptedProvider`; they never call a model endpoint and do not consume
+API tokens. Running `python -m verilog_agent.agents.demo ...` is the explicit live-model path.
 
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in

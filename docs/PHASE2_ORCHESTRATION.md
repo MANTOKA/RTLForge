@@ -35,9 +35,10 @@ rollback, and recovery work without network access, API keys, model cost, prompt
 random model output. A failure therefore identifies an orchestration defect instead of an
 ambiguous model/provider problem.
 
-Real Planner, Generator, and Debugger implementations will implement the same typed
-interfaces. Replacing a Fake does not change the state machine or persistence format.
-Candidate Evaluation and Verification remain deterministic services rather than LLM Agents.
+Real Planner and Generator now implement the same typed interfaces through a structured model
+Provider. Replacing their Fakes did not change the state machine or persistence format. The
+real Debugger is deliberately deferred to the repair slice. Candidate Evaluation and
+Verification remain deterministic services rather than LLM Agents.
 
 ## Run the demonstrator
 
@@ -52,3 +53,6 @@ From the repository root:
 The command deliberately fails verification once, creates one repaired candidate, then
 completes. It prints the final task context and the ordered persisted events as JSON. The
 database is under the Git-ignored `work/` directory.
+
+For the real Planner/Generator configuration and its current verification boundary, see
+[`REAL_AGENTS.md`](REAL_AGENTS.md).
