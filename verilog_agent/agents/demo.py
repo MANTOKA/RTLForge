@@ -12,6 +12,7 @@ from verilog_agent.providers import (
     ProviderConfigurationError,
     ProviderSettings,
 )
+from verilog_agent.services import DockerEDARunner, StaticCandidateEvaluator
 from verilog_agent.testing import ScriptedProvider
 from verilog_agent.testing.examples import (
     OFFLINE_COUNTER_SPEC,
@@ -40,6 +41,19 @@ def main() -> None:
     parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
+    parser.add_argument(
+        "--static-evaluation",
+        action="store_true",
+        help=(
+            "Run compile, lint, and static quality checks for every candidate in the Docker "
+            "sandbox, then select a candidate. This does not run a testbench simulation."
+        ),
+    )
+    parser.add_argument(
+        "--docker-image",
+        default="verilog-agent-sandbox:latest",
+        help="Docker image used by --static-evaluation",
+    )
     parser.add_argument(
         "--env-file",
         type=Path,
@@ -86,6 +100,14 @@ def main() -> None:
         provider_label=provider_label,
         database=args.database,
         runs_root=args.runs_root,
+        evaluator=(
+            StaticCandidateEvaluator(
+                runner=DockerEDARunner(args.runs_root, image=args.docker_image),
+                runs_root=args.runs_root,
+            )
+            if args.static_evaluation
+            else None
+        ),
     )
     try:
         showcase.run(raw_spec, candidate_count=args.candidates)

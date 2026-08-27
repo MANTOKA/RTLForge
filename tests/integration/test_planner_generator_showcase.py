@@ -4,12 +4,31 @@ import json
 from pathlib import Path
 
 from verilog_agent.agents import PlannerGeneratorShowcase
+from verilog_agent.services import StaticCandidateEvaluator
 from verilog_agent.testing import (
     OFFLINE_COUNTER_SPEC,
     ScriptedProvider,
     counter_candidate_payload,
     counter_plan_payload,
 )
+
+
+class PassingRunner:
+    def run(self, action: str, _candidate_path: Path) -> dict:
+        return {
+            "schema_version": 1,
+            "action": action,
+            "stage": action.upper(),
+            "status": "PASS",
+            "category": "OK",
+            "tool": "iverilog" if action == "compile" else "verilator",
+            "returncode": 0,
+            "duration_ms": 1,
+            "errors": [],
+            "metrics": {"score": 100} if action == "eval_quality" else {},
+            "stdout": "",
+            "stderr": "",
+        }
 
 
 def test_showcase_exposes_plan_tree_candidates_and_event_trace(tmp_path: Path) -> None:
@@ -55,3 +74,26 @@ def test_showcase_exposes_plan_tree_candidates_and_event_trace(tmp_path: Path) -
     )
     assert saved_summary["verified_rtl"] is False
     assert all(Path(item["artifact_path"]).is_file() for item in summary["candidates"])
+
+
+def test_showcase_can_stop_after_real_static_candidate_selection(tmp_path: Path) -> None:
+    output: list[str] = []
+    showcase = PlannerGeneratorShowcase(
+        provider=ScriptedProvider(counter_plan_payload(), counter_candidate_payload()),
+        provider_label="scripted_test (NO LLM API CALL)",
+        database=tmp_path / "showcase.sqlite",
+        runs_root=tmp_path / "runs",
+        evaluator=StaticCandidateEvaluator(PassingRunner(), tmp_path / "runs"),
+        emit=output.append,
+    )
+
+    summary = showcase.run(OFFLINE_COUNTER_SPEC, candidate_count=2)
+
+    rendered = "\n".join(output)
+    assert summary["current_stage"] == "VERIFYING"
+    assert summary["static_gate_passed"] is True
+    assert summary["verified_rtl"] is False
+    assert summary["selected_candidate_id"] == "cand_01"
+    assert "阶段 3：Candidate Evaluation 正在执行 Docker 静态门禁" in rendered
+    assert "selected_candidate: cand_01" in rendered
+    assert "未执行 testbench 仿真" in rendered

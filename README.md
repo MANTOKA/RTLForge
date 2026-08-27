@@ -107,6 +107,16 @@ explicit live-model path. Live mode automatically loads an ignored local `.env`;
 `--check-config` to display the effective non-secret endpoint and model without making an API
 call. See [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
 
+To deterministically compile, lint, and statically score every generated candidate in the
+restricted Docker sandbox, then select one candidate (without claiming functional simulation), run:
+
+```powershell
+python -m verilog_agent.agents.demo --static-evaluation --candidates 3
+```
+
+The default is two candidates; the live Generator supports either two or three. The offline
+scripted example contains exactly two candidates.
+
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in
 [`config/default.toml`](config/default.toml); credentials never belong in that file.

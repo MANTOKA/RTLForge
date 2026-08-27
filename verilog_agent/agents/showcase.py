@@ -11,6 +11,7 @@ from verilog_agent.agents.planner import RealPlanner
 from verilog_agent.domain import Budget, RTLTaskContext, TaskStage, TaskTreeNode
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
 from verilog_agent.providers import StructuredModelProvider
+from verilog_agent.services import StaticCandidateEvaluator
 
 
 class ShowcaseRunError(RuntimeError):
@@ -40,12 +41,14 @@ class PlannerGeneratorShowcase:
         provider_label: str,
         database: Path,
         runs_root: Path,
+        evaluator: StaticCandidateEvaluator | None = None,
         emit: Callable[[str], None] = print,
     ) -> None:
         self.provider = provider
         self.provider_label = provider_label
         self.database = database
         self.runs_root = runs_root
+        self.evaluator = evaluator
         self.emit = emit
 
     def run(self, raw_spec: str, *, candidate_count: int = 2) -> dict:
@@ -57,7 +60,7 @@ class PlannerGeneratorShowcase:
                 self.provider, artifacts=ArtifactRepository(self.runs_root)
             ),
             debugger=stop_after_generation,
-            evaluator=stop_after_generation,
+            evaluator=self.evaluator or stop_after_generation,
             verifier=stop_after_generation,
             store=store,
         )
@@ -72,7 +75,10 @@ class PlannerGeneratorShowcase:
         self._heading("VerilogAgent Planner / Generator 可观察演示")
         self.emit(f"Provider: {self.provider_label}")
         self.emit(f"Task ID: {context.task_id}")
-        self.emit("verified_rtl: false（此演示有意停在候选生成后）")
+        if self.evaluator is None:
+            self.emit("verified_rtl: false（此演示有意停在候选生成后）")
+        else:
+            self.emit("verified_rtl: false（本次只完成静态 EDA 门禁，尚未功能仿真）")
         self._heading("阶段 0：用户自然语言需求")
         self.emit(raw_spec)
 
@@ -104,8 +110,24 @@ class PlannerGeneratorShowcase:
         self._render_candidates(context)
         self.emit(f"Generator elapsed: {generator_ms} ms")
 
+        static_evaluation: dict | None = None
+        evaluator_ms: int | None = None
+        if self.evaluator is not None:
+            self._heading("阶段 3：Candidate Evaluation 正在执行 Docker 静态门禁")
+            started = perf_counter()
+            orchestrator.advance_task(context.task_id)
+            evaluator_ms = round((perf_counter() - started) * 1000)
+            self._expect_stage(context, TaskStage.VERIFYING, store, "Candidate Evaluation")
+            selected = context.candidate()
+            static_evaluation = dict(selected.metadata.get("static_evaluation", {}))
+            self._render_static_evaluation(context)
+            self.emit(f"selected_candidate: {selected.candidate_id}")
+            self.emit(f"selected_artifact: {selected.artifact_path}")
+            self.emit(f"Candidate Evaluation elapsed: {evaluator_ms} ms")
+            self.emit("静态门禁已通过；未执行 testbench 仿真，因此 verified_rtl 仍为 false。")
+
         events = store.list_events(context.task_id)
-        self._heading("阶段 3：Orchestrator 事件轨迹")
+        self._heading("阶段 4：Orchestrator 事件轨迹")
         for event in events:
             self.emit(
                 f"{event.sequence:02d}. {event.event_type.value} "
@@ -117,12 +139,23 @@ class PlannerGeneratorShowcase:
             "task_id": context.task_id,
             "input": raw_spec,
             "current_stage": context.current_stage.value,
-            "next_stage": "Candidate Evaluation Service (Phase 2 Week 6)",
+            "next_stage": (
+                "Candidate Evaluation Service (Phase 2 Week 6)"
+                if self.evaluator is None
+                else "Functional Verification Service"
+            ),
             "verified_rtl": False,
-            "timings_ms": {"planner": planner_ms, "generator": generator_ms},
+            "static_gate_passed": self.evaluator is not None,
+            "timings_ms": {
+                "planner": planner_ms,
+                "generator": generator_ms,
+                "candidate_evaluation": evaluator_ms,
+            },
             "spec_ir": context.spec_ir.to_dict(),
             "task_tree": context.task_tree_root.to_dict(),
             "candidates": [candidate.to_dict() for candidate in context.candidates],
+            "selected_candidate_id": context.selected_candidate_id,
+            "selected_static_evaluation": static_evaluation,
             "events": [event.to_dict() for event in events],
         }
         summary_path = task_root / "showcase_summary.json"
@@ -132,7 +165,10 @@ class PlannerGeneratorShowcase:
         self.emit(f"SpecIR: {(task_root / 'spec_ir.json').as_posix()}")
         self.emit(f"Task Tree: {(task_root / 'task_tree.json').as_posix()}")
         self.emit(f"完整摘要: {summary_path.as_posix()}")
-        self.emit("下一步尚未执行：候选评分、EDA 验证和 Debugger 修复。")
+        if self.evaluator is None:
+            self.emit("下一步尚未执行：候选评分、EDA 验证和 Debugger 修复。")
+        else:
+            self.emit("下一步尚未执行：testbench 仿真、失败分类和 Debugger 修复。")
         return summary
 
     def _render_spec(self, context: RTLTaskContext) -> None:
@@ -170,6 +206,22 @@ class PlannerGeneratorShowcase:
             self.emit(f"----- {candidate.candidate_id} RTL BEGIN -----")
             self.emit(rtl.rstrip())
             self.emit(f"----- {candidate.candidate_id} RTL END -----")
+
+    def _render_static_evaluation(self, context: RTLTaskContext) -> None:
+        for candidate in context.candidates:
+            report = candidate.metadata.get("static_evaluation", {})
+            self.emit("")
+            self.emit(f"Candidate: {candidate.candidate_id}")
+            self.emit(f"  static_accepted: {report.get('accepted', False)}")
+            self.emit(f"  quality_score: {report.get('quality_score', 0)}")
+            if report.get("reason"):
+                self.emit(f"  reason: {report['reason']}")
+            for action, result in report.get("results", {}).items():
+                self.emit(
+                    f"  {action}: {result.get('status')} "
+                    f"[{result.get('tool')}, {result.get('duration_ms')} ms, "
+                    f"{result.get('category')}]"
+                )
 
     def _expect_stage(
         self,

@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import json
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from verilog_agent.domain import Candidate, RTLTaskContext
+from verilog_agent.services import DockerEDARunner, DockerToolError, StaticCandidateEvaluator
+
+
+def _tool_result(action: str, *, status: str = "PASS", score: int = 100) -> dict:
+    return {
+        "schema_version": 1,
+        "action": action,
+        "stage": action.upper(),
+        "status": status,
+        "category": "OK" if status == "PASS" else "LINT_ERROR",
+        "tool": "verilator" if action != "compile" else "iverilog",
+        "returncode": 0 if status == "PASS" else 1,
+        "duration_ms": 7,
+        "errors": [],
+        "metrics": {"score": score} if action == "eval_quality" else {},
+        "stdout": "",
+        "stderr": "",
+    }
+
+
+class RecordingRunner:
+    def __init__(
+        self, scores: dict[str, int], failures: set[tuple[str, str]] | None = None
+    ) -> None:
+        self.scores = scores
+        self.failures = failures or set()
+        self.calls: list[tuple[str, str]] = []
+
+    def run(self, action: str, candidate_path: Path) -> dict:
+        candidate_id = candidate_path.parent.name
+        self.calls.append((candidate_id, action))
+        status = "FAIL" if (candidate_id, action) in self.failures else "PASS"
+        return _tool_result(action, status=status, score=self.scores[candidate_id])
+
+
+def _context_with_candidates(tmp_path: Path) -> tuple[RTLTaskContext, Path]:
+    runs_root = tmp_path / "runs"
+    context = RTLTaskContext(task_id="task_static", raw_spec="counter")
+    for candidate_id in ("cand_01", "cand_02"):
+        path = runs_root / context.task_id / "candidates" / candidate_id / "counter.v"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("module counter; endmodule\n", encoding="utf-8")
+        context.candidates.append(
+            Candidate(
+                candidate_id=candidate_id,
+                artifact_path=str(path),
+                code_hash=sha256(path.read_bytes()).hexdigest(),
+            )
+        )
+    return context, runs_root
+
+
+def test_static_evaluator_selects_highest_quality_passing_candidate(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = RecordingRunner({"cand_01": 85, "cand_02": 100})
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is True
+    assert outcome.selected_candidate_id == "cand_02"
+    assert outcome.scores == {"cand_01": 85.0, "cand_02": 100.0}
+    assert len(runner.calls) == 6
+    report = json.loads((runs_root / context.task_id / "static_evaluation.json").read_text())
+    assert report["candidates"]["cand_01"]["accepted"] is True
+    assert (runs_root / context.task_id / "tool_runs" / "cand_02_lint.json").is_file()
+
+
+def test_static_evaluator_rejects_candidate_that_fails_a_gate(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = RecordingRunner(
+        {"cand_01": 100, "cand_02": 100}, failures={("cand_02", "lint")}
+    )
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is True
+    assert outcome.selected_candidate_id == "cand_01"
+    assert context.candidates[1].metadata["static_evaluation"]["accepted"] is False
+    assert "lint" in context.candidates[1].metadata["static_evaluation"]["reason"]
+
+
+def test_static_evaluator_rejects_when_all_candidates_fail(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = RecordingRunner(
+        {"cand_01": 100, "cand_02": 100},
+        failures={("cand_01", "compile"), ("cand_02", "lint")},
+    )
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is False
+    assert outcome.selected_candidate_id is None
+    assert outcome.scores == {"cand_01": 0.0, "cand_02": 0.0}
+
+
+def test_docker_runner_rejects_artifacts_outside_runs_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.v"
+    outside.write_text("module outside; endmodule\n", encoding="utf-8")
+    runner = DockerEDARunner(tmp_path / "runs", docker_bin="docker")
+
+    with pytest.raises(DockerToolError, match="outside"):
+        runner.run("compile", outside)
