@@ -20,6 +20,10 @@ class EDARunner(Protocol):
     def run(self, action: str, candidate_path: Path) -> dict[str, Any]: ...
 
 
+class MultiFileEDARunner(EDARunner, Protocol):
+    def run_files(self, action: str, input_paths: list[Path]) -> dict[str, Any]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class DockerEDARunner:
     """Invoke the existing restricted Docker wrapper for one generated RTL file."""
@@ -28,21 +32,52 @@ class DockerEDARunner:
     image: str = "verilog-agent-sandbox:latest"
     docker_bin: str | None = None
     timeout_seconds: int = 120
+    readonly_roots: tuple[Path, ...] = ()
 
     def run(self, action: str, candidate_path: Path) -> dict[str, Any]:
         host_root = self.runs_root.resolve()
         resolved_candidate = candidate_path.resolve(strict=True)
         try:
-            relative_candidate = resolved_candidate.relative_to(host_root)
+            resolved_candidate.relative_to(host_root)
         except ValueError as error:
             raise DockerToolError(
                 "candidate artifact is outside the configured runs root"
             ) from error
+        return self.run_files(action, [resolved_candidate])
+
+    def run_files(self, action: str, input_paths: list[Path]) -> dict[str, Any]:
+        if not input_paths:
+            raise DockerToolError("at least one EDA input file is required")
+        host_root = self.runs_root.resolve()
+        allowed_roots = [host_root, *(root.resolve() for root in self.readonly_roots)]
+        resolved_inputs = [path.resolve(strict=True) for path in input_paths]
+        mount_targets: dict[Path, str] = {host_root.parent: "/inputs/repo"}
+        container_inputs: list[str] = []
+        for resolved_input in resolved_inputs:
+            matched_root: Path | None = None
+            target = ""
+            try:
+                relative = resolved_input.relative_to(host_root.parent)
+                if resolved_input.is_relative_to(host_root):
+                    matched_root = host_root
+                    target = "/inputs/repo"
+            except ValueError:
+                relative = Path()
+            if matched_root is None:
+                for index, root in enumerate(allowed_roots[1:]):
+                    try:
+                        relative = resolved_input.relative_to(root)
+                    except ValueError:
+                        continue
+                    matched_root = root
+                    target = f"/inputs/oracle_{index}"
+                    mount_targets[root] = target
+                    break
+            if matched_root is None:
+                raise DockerToolError("EDA input is outside configured read-only roots")
+            container_inputs.append(f"{target}/{relative.as_posix()}")
 
         docker = self._docker_binary()
-        mount_root = host_root.parent
-        container_input_root = f"/repo/{host_root.name}"
-        container_candidate = f"/repo/{host_root.name}/{relative_candidate.as_posix()}"
         command = [
             docker,
             "run",
@@ -57,22 +92,28 @@ class DockerEDARunner:
             "--env",
             "TMPDIR=/work",
             "--env",
-            f"VERILOG_AGENT_INPUT_ROOT={container_input_root}",
+            "VERILOG_AGENT_INPUT_ROOT=/inputs",
             "--pids-limit",
             "128",
             "--memory",
             "512m",
             "--cpus",
             "1",
-            "--mount",
-            f"type=bind,source={mount_root},target=/repo,readonly",
-            self.image,
-            "python3",
-            "-u",
-            "/opt/verilog-agent/tool_wrapper.py",
-            action,
-            container_candidate,
         ]
+        for source, target in mount_targets.items():
+            command.extend(
+                ["--mount", f"type=bind,source={source},target={target},readonly"]
+            )
+        command.extend(
+            [
+                self.image,
+                "python3",
+                "-u",
+                "/opt/verilog-agent/tool_wrapper.py",
+                action,
+                *container_inputs,
+            ]
+        )
         try:
             completed = subprocess.run(
                 command,
@@ -139,7 +180,9 @@ class StaticCandidateEvaluator:
             reports[candidate.candidate_id] = report
             candidate.metadata["static_evaluation"] = report
             scores[candidate.candidate_id] = (
-                float(report["quality_score"]) if report["accepted"] else 0.0
+                float(report["quality_score"])
+                if report["eligible_for_verification"]
+                else 0.0
             )
 
         report_path = task_root / "static_evaluation.json"
@@ -151,7 +194,7 @@ class StaticCandidateEvaluator:
         accepted = [
             candidate
             for candidate in context.candidates
-            if reports[candidate.candidate_id]["accepted"]
+            if reports[candidate.candidate_id]["eligible_for_verification"]
         ]
         if not accepted:
             reasons = "; ".join(
@@ -159,7 +202,17 @@ class StaticCandidateEvaluator:
             )
             return EvaluationOutcome(False, None, scores=scores, reason=reasons)
 
-        selected = min(accepted, key=lambda item: (-scores[item.candidate_id], item.candidate_id))
+        ranked = sorted(
+            accepted,
+            key=lambda item: (
+                not reports[item.candidate_id]["threshold_passed"],
+                -scores[item.candidate_id],
+                item.candidate_id,
+            ),
+        )
+        context.metadata["verification_order"] = [item.candidate_id for item in ranked]
+        context.metadata["static_evaluation_report"] = str(report_path)
+        selected = ranked[0]
         return EvaluationOutcome(True, selected.candidate_id, scores=scores)
 
     def _evaluate_candidate(
@@ -186,6 +239,7 @@ class StaticCandidateEvaluator:
                 candidate_id,
                 results,
                 accepted=False,
+                hard_gates_passed=False,
                 gate_stage="PATH_VALIDATED",
                 reason="interface gate failed",
             )
@@ -204,6 +258,7 @@ class StaticCandidateEvaluator:
                 candidate_id,
                 results,
                 accepted=False,
+                hard_gates_passed=False,
                 gate_stage=self._gate_stage(results),
                 reason=str(error),
             )
@@ -216,7 +271,8 @@ class StaticCandidateEvaluator:
         metrics = results["eval_quality"].get("metrics", {})
         quality_score = float(metrics.get("score", 0))
         threshold = float(metrics.get("threshold", 75))
-        accepted = not failed and quality_score >= threshold
+        hard_gates_passed = not failed
+        accepted = hard_gates_passed and quality_score >= threshold
         if failed:
             reason = f"failed static gates: {', '.join(failed)}"
         elif quality_score < threshold:
@@ -227,6 +283,7 @@ class StaticCandidateEvaluator:
             candidate_id,
             results,
             accepted=accepted,
+            hard_gates_passed=hard_gates_passed,
             gate_stage=self._gate_stage(results),
             reason=reason,
         )
@@ -251,6 +308,7 @@ class StaticCandidateEvaluator:
         results: dict[str, dict[str, Any]],
         *,
         accepted: bool,
+        hard_gates_passed: bool,
         gate_stage: str,
         reason: str,
     ) -> dict[str, Any]:
@@ -268,6 +326,8 @@ class StaticCandidateEvaluator:
         }
         return {
             "accepted": accepted,
+            "eligible_for_verification": hard_gates_passed,
+            "threshold_passed": quality_score >= threshold,
             "reason": reason,
             "quality_score": quality_score,
             "scorecard": scorecard,

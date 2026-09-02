@@ -58,13 +58,13 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 | Real Planner Agent | 已完成第一版 | 严格结构化输出、本地校验、假设记录 |
 | Real Generator Agent | 已完成第一版 | 多候选、路径安全、内容哈希和去重 |
 | Candidate Evaluation Service | 功能分支已实现，待合并验收 | 已加入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据和评分有效性指标；完整 Docker 回归待镜像重建 |
-| Verification Service | 待完成 | 尚未把 testbench 仿真 verdict 正式接入真实 Orchestrator |
+| Verification Service | 第一版已实现并完成单题闭环 | 支持 golden testbench、按评分顺序回退、证据报告、失败分类和受控 Debugger feedback；`Prob001_zero` 已到达 `verified_rtl=true` |
 | Debugger Agent 与 Reflection Router | 待完成 | 目前仅有接口/Fake 路径；应由真实验证失败稀疏触发 |
 | Memory 与 Consolidation Worker | 待完成 | 已有设计，尚无长期记忆实现和消融证据 |
 | API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
-| VerilogEval-Human v2 正式评测 | 部分完成 | 已验证本地 156 题 triplet 完整并建立 prompt/oracle/reference 可见性隔离；Verification harness 和冻结版本仍待完成 |
+| VerilogEval-Human v2 正式评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；模型基线与冻结版本仍待完成 |
 
-当前非 Docker 快速回归结果为 `57 passed, 11 skipped`；11 项均为需显式启用 Docker 的集成测试。该结果证明 Python 层回归通过，不等于 156 题 RTL 功能评测通过。
+当前非 Docker 快速回归结果为 `66 passed, 11 skipped`；11 项均为需显式启用 Docker 的集成测试。该结果证明 Python 层回归通过，不等于 156 题 RTL 功能评测通过。
 
 ---
 

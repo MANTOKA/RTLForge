@@ -7,12 +7,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
+from verilog_agent.benchmarks.verilogeval import load_human_v2
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
     ProviderConfigurationError,
     ProviderSettings,
 )
-from verilog_agent.services import DockerEDARunner, StaticCandidateEvaluator
+from verilog_agent.services import (
+    DockerEDARunner,
+    GoldenTestbenchVerificationService,
+    StaticCandidateEvaluator,
+)
 from verilog_agent.testing import ScriptedProvider
 from verilog_agent.testing.examples import (
     OFFLINE_COUNTER_SPEC,
@@ -46,13 +51,27 @@ def main() -> None:
         action="store_true",
         help=(
             "Run compile, lint, and static quality checks for every candidate in the Docker "
-            "sandbox, then select a candidate. This does not run a testbench simulation."
+            "sandbox, then select a candidate. Add --testbench or Human v2 options for simulation."
         ),
     )
     parser.add_argument(
         "--docker-image",
         default="verilog-agent-sandbox:latest",
         help="Docker image used by --static-evaluation",
+    )
+    parser.add_argument(
+        "--testbench",
+        type=Path,
+        help="authoritative testbench; implies functional verification after static evaluation",
+    )
+    parser.add_argument(
+        "--human-v2-root",
+        type=Path,
+        help="external VerilogEval-Human v2 dataset_dumpall directory",
+    )
+    parser.add_argument(
+        "--human-v2-case",
+        help="Human v2 problem id such as Prob001_zero; requires --human-v2-root",
     )
     parser.add_argument(
         "--env-file",
@@ -65,6 +84,24 @@ def main() -> None:
         help="Validate and display non-secret live provider settings without making an API call",
     )
     args = parser.parse_args()
+
+    if bool(args.human_v2_root) != bool(args.human_v2_case):
+        parser.error("--human-v2-root and --human-v2-case must be used together")
+    benchmark_case = None
+    if args.human_v2_root:
+        if args.spec is not None or args.offline_example:
+            parser.error("Human v2 mode supplies its own prompt; omit spec and --offline-example")
+        cases = load_human_v2(args.human_v2_root)
+        benchmark_case = next(
+            (case for case in cases if case.problem_id == args.human_v2_case), None
+        )
+        if benchmark_case is None:
+            parser.error(f"Human v2 case not found: {args.human_v2_case}")
+        if args.testbench is not None:
+            parser.error("Human v2 mode selects its own golden testbench; omit --testbench")
+        args.testbench = benchmark_case.testbench_path
+    if args.testbench is not None and not args.static_evaluation:
+        parser.error("functional verification requires --static-evaluation")
 
     if args.offline_example:
         if args.env_file is not None or args.check_config:
@@ -86,7 +123,8 @@ def main() -> None:
         if args.check_config:
             _print_provider_config(settings, loaded_env_file)
             return
-        raw_spec = args.spec or _prompt_for_spec(parser)
+        raw_spec = benchmark_case.read_agent_spec() if benchmark_case else args.spec
+        raw_spec = raw_spec or _prompt_for_spec(parser)
         if not raw_spec.strip():
             parser.error("RTL requirement must not be empty")
         endpoint = settings.base_url or "https://api.openai.com/v1"
@@ -95,6 +133,15 @@ def main() -> None:
             f"openai_responses model={settings.model} endpoint={endpoint}{config_source}"
         )
 
+    runner = (
+        DockerEDARunner(
+            args.runs_root,
+            image=args.docker_image,
+            readonly_roots=((args.testbench.resolve().parent,) if args.testbench else ()),
+        )
+        if args.static_evaluation
+        else None
+    )
     showcase = PlannerGeneratorShowcase(
         provider=provider,
         provider_label=provider_label,
@@ -102,10 +149,29 @@ def main() -> None:
         runs_root=args.runs_root,
         evaluator=(
             StaticCandidateEvaluator(
-                runner=DockerEDARunner(args.runs_root, image=args.docker_image),
+                runner=runner,
                 runs_root=args.runs_root,
             )
-            if args.static_evaluation
+            if runner is not None
+            else None
+        ),
+        verifier=(
+            GoldenTestbenchVerificationService(
+                runner=runner,
+                runs_root=args.runs_root,
+                testbench_resolver=lambda _context: args.testbench,
+                reference_resolver=(
+                    (lambda _context: benchmark_case.reference_path)
+                    if benchmark_case
+                    else None
+                ),
+                testbench_source=(
+                    f"VerilogEval-Human-v2/{benchmark_case.problem_id}"
+                    if benchmark_case
+                    else "user_provided"
+                ),
+            )
+            if runner is not None and args.testbench is not None
             else None
         ),
     )

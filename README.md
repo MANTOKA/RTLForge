@@ -22,8 +22,9 @@ which is excluded from Git.
 The Phase 2 implementation now includes versioned domain models, an explicit task state
 machine, SQLite events/checkpoints, budgets, cancellation, deterministic Fake Agents, and
 real model-backed Planner and Generator implementations. The real agents use an
-OpenAI-compatible Responses endpoint with strict structured output. The Debugger, deterministic
-candidate evaluation/verification services, and browser UI are later slices. See
+OpenAI-compatible Responses endpoint with strict structured output. Deterministic candidate
+evaluation and first-pass golden-testbench verification are implemented; the real Debugger and
+browser UI are later slices. See
 [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
 [`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md). A step-by-step Chinese demonstration guide is
 available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
@@ -116,6 +117,11 @@ python -m verilog_agent.agents.demo --static-evaluation --candidates 3
 
 The default is two candidates; the live Generator supports either two or three. The offline
 scripted example contains exactly two candidates.
+
+Human v2 dataset integrity/reference preflight and one-case model-backed verification are
+documented in [`docs/VERIFICATION_HUMAN_V2_ZH.md`](docs/VERIFICATION_HUMAN_V2_ZH.md). The benchmark
+remains external to the product repository, and golden testbench/reference source is never sent
+to Planner, Generator, or Debugger.
 
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in

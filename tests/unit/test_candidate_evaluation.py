@@ -156,6 +156,21 @@ def test_static_evaluator_enforces_configured_threshold(tmp_path: Path) -> None:
     assert "below threshold" in rejected["reason"]
 
 
+def test_below_threshold_candidates_remain_as_verification_fallbacks(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = RecordingRunner({"cand_01": 74, "cand_02": 70})
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is True
+    assert outcome.selected_candidate_id == "cand_01"
+    assert context.metadata["verification_order"] == ["cand_01", "cand_02"]
+    assert all(
+        candidate.metadata["static_evaluation"]["eligible_for_verification"]
+        for candidate in context.candidates
+    )
+
+
 def test_docker_runner_rejects_artifacts_outside_runs_root(tmp_path: Path) -> None:
     outside = tmp_path / "outside.v"
     outside.write_text("module outside; endmodule\n", encoding="utf-8")
@@ -163,3 +178,15 @@ def test_docker_runner_rejects_artifacts_outside_runs_root(tmp_path: Path) -> No
 
     with pytest.raises(DockerToolError, match="outside"):
         runner.run("compile", outside)
+
+
+def test_docker_runner_rejects_unapproved_oracle_path(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    unapproved = tmp_path / "private" / "golden_test.sv"
+    unapproved.parent.mkdir()
+    unapproved.write_text("module tb; endmodule\n", encoding="utf-8")
+    runner = DockerEDARunner(runs_root, docker_bin="docker")
+
+    with pytest.raises(DockerToolError, match="read-only roots"):
+        runner.run_files("simulate", [unapproved])

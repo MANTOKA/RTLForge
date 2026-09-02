@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 from verilog_agent.agents import PlannerGeneratorShowcase
-from verilog_agent.services import StaticCandidateEvaluator
+from verilog_agent.services import (
+    GoldenTestbenchVerificationService,
+    StaticCandidateEvaluator,
+)
 from verilog_agent.testing import (
     OFFLINE_COUNTER_SPEC,
     ScriptedProvider,
@@ -29,6 +32,9 @@ class PassingRunner:
             "stdout": "",
             "stderr": "",
         }
+
+    def run_files(self, action: str, input_paths: list[Path]) -> dict:
+        return self.run(action, input_paths[-1])
 
 
 def test_showcase_exposes_plan_tree_candidates_and_event_trace(tmp_path: Path) -> None:
@@ -97,3 +103,32 @@ def test_showcase_can_stop_after_real_static_candidate_selection(tmp_path: Path)
     assert "阶段 3：Candidate Evaluation 正在执行 Docker 静态门禁" in rendered
     assert "selected_candidate: cand_01" in rendered
     assert "未执行 testbench 仿真" in rendered
+
+
+def test_showcase_can_complete_functional_verification(tmp_path: Path) -> None:
+    output: list[str] = []
+    runs_root = tmp_path / "runs"
+    runner = PassingRunner()
+    testbench = tmp_path / "benchmark" / "counter_test.sv"
+    testbench.parent.mkdir()
+    testbench.write_text("module tb; endmodule\n", encoding="utf-8")
+    showcase = PlannerGeneratorShowcase(
+        provider=ScriptedProvider(counter_plan_payload(), counter_candidate_payload()),
+        provider_label="scripted_test (NO LLM API CALL)",
+        database=tmp_path / "showcase.sqlite",
+        runs_root=runs_root,
+        evaluator=StaticCandidateEvaluator(runner, runs_root),
+        verifier=GoldenTestbenchVerificationService(
+            runner, runs_root, lambda _context: testbench
+        ),
+        emit=output.append,
+    )
+
+    summary = showcase.run(OFFLINE_COUNTER_SPEC, candidate_count=2)
+
+    rendered = "\n".join(output)
+    assert summary["current_stage"] == "COMPLETED"
+    assert summary["verified_rtl"] is True
+    assert summary["verification"]["passed"] is True
+    assert "Verification 正在执行 golden testbench 仿真" in rendered
+    assert "verified_rtl: true" in rendered

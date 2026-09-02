@@ -61,10 +61,42 @@ def main() -> int:
         help="dataset_dumpall directory (or set VERILOG_EVAL_HUMAN_V2_ROOT)",
     )
     parser.add_argument("--expected-count", type=int, default=156)
+    parser.add_argument(
+        "--preflight-reference",
+        action="store_true",
+        help="simulate official reference RTL against golden testbenches without model calls",
+    )
+    parser.add_argument("--limit", type=int, help="limit reference preflight to the first N cases")
+    parser.add_argument(
+        "--summary-only", action="store_true", help="omit per-case rows from terminal JSON"
+    )
+    parser.add_argument("--docker-image", default="verilog-agent-sandbox:latest")
+    parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     args = parser.parse_args()
     if not args.dataset_root:
         parser.error("--dataset-root or VERILOG_EVAL_HUMAN_V2_ROOT is required")
     cases = load_human_v2(Path(args.dataset_root), expected_count=args.expected_count)
+    if args.preflight_reference:
+        from verilog_agent.benchmarks.preflight import preflight_references
+        from verilog_agent.services import DockerEDARunner
+
+        dataset_root = Path(args.dataset_root).resolve()
+        runner = DockerEDARunner(
+            runs_root=args.runs_root,
+            image=args.docker_image,
+            readonly_roots=(dataset_root,),
+        )
+        output_path = (
+            args.runs_root / "benchmarks" / "verilogeval_human_v2_reference_preflight.json"
+        )
+        payload = preflight_references(cases, runner, output_path, limit=args.limit)
+        terminal_payload = (
+            {key: value for key, value in payload.items() if key != "results"}
+            if args.summary_only
+            else payload
+        )
+        print(json.dumps(terminal_payload, ensure_ascii=False, indent=2))
+        return 0 if payload["failed"] == 0 else 1
     print(
         json.dumps(
             {
