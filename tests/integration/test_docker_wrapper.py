@@ -39,6 +39,9 @@ def _run(command: list[str], *, timeout: int = 300) -> subprocess.CompletedProce
 
 @pytest.fixture(scope="session")
 def docker_image() -> str:
+    existing_image = os.environ.get("VERILOG_AGENT_TEST_IMAGE")
+    if existing_image:
+        return existing_image
     docker = _docker_binary()
     result = _run([docker, "build", "-t", IMAGE, str(REPO_ROOT)], timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr

@@ -64,7 +64,7 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 | API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
 | VerilogEval-Human v2 正式评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；模型基线与冻结版本仍待完成 |
 
-当前非 Docker 快速回归结果为 `66 passed, 11 skipped`；11 项均为需显式启用 Docker 的集成测试。该结果证明 Python 层回归通过，不等于 156 题 RTL 功能评测通过。
+当前非 Docker 快速回归结果为 `66 passed, 11 skipped`；显式复用本地 EDA 镜像运行时，11 项 Docker 集成测试为 `11 passed`。该结果证明软件与工具链回归通过，不等于 156 题 Agent 生成功能评测通过。
 
 ---
 

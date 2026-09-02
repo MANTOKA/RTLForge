@@ -35,6 +35,15 @@ testbench。适配文件只写入忽略版本控制的 `runs/benchmarks/referenc
 `TOOL_INCOMPATIBILITY`，不能记为 Generator 或 Debugger 失败。正式报告应同时保留原始 156 题结果和
 排除工具不兼容后的 154 题结果。
 
+若 Docker Hub 暂时不可访问，但本地已有包含完整 EDA 工具链的镜像，可通过
+`VERILOG_AGENT_TEST_IMAGE` 复用本地镜像运行集成测试；CI 默认仍从标准 Dockerfile 构建：
+
+```powershell
+$env:VERILOG_AGENT_TEST_IMAGE = "verilog-agent-sandbox:verification-local"
+.\.venv\Scripts\python.exe -m pytest --run-integration -m integration -q
+Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
+```
+
 ## 单题真实闭环
 
 下面的命令会调用真实 Planner/Generator，产生两个候选、静态排序，再运行该题 golden testbench：
@@ -54,3 +63,6 @@ testbench。适配文件只写入忽略版本控制的 `runs/benchmarks/referenc
 候选，`cand_01` 静态分 100 并通过 golden testbench，任务最终状态为 `COMPLETED`，
 `verified_rtl=true`。运行证据位于 `runs/task_563693e5c691/`；`runs/` 被 Git 忽略，不会把模型
 输出或 benchmark reference 提交进产品源码。
+
+本轮验证汇总：非 Docker 回归 `66 passed, 11 skipped`；设置本地测试镜像后，显式 Docker
+集成回归 `11 passed`。
