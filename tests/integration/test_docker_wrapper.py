@@ -219,8 +219,11 @@ def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> 
     assert result["status"] == "PASS"
     assert result["metrics"] == {
         "score": 100,
+        "threshold": 75,
+        "config_version": "score-v1",
         "error_count": 0,
         "warning_count": 0,
+        "deductions": [],
     }
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from verilog_agent.domain import EvaluationOutcome, RTLTaskContext
+from verilog_agent.services.interface_check import check_rtl_interface
 
 
 class DockerToolError(RuntimeError):
@@ -119,6 +120,8 @@ class StaticCandidateEvaluator:
     def evaluate(self, context: RTLTaskContext) -> EvaluationOutcome:
         if not context.candidates:
             return EvaluationOutcome(False, None, reason="no generated candidates")
+        if context.spec_ir is None:
+            return EvaluationOutcome(False, None, reason="SpecIR is required for interface gating")
 
         task_root = self.runs_root / context.task_id
         evidence_root = task_root / "tool_runs"
@@ -128,7 +131,10 @@ class StaticCandidateEvaluator:
 
         for candidate in context.candidates:
             report = self._evaluate_candidate(
-                candidate.artifact_path, candidate.candidate_id, evidence_root
+                candidate.artifact_path,
+                candidate.candidate_id,
+                evidence_root,
+                context.spec_ir,
             )
             reports[candidate.candidate_id] = report
             candidate.metadata["static_evaluation"] = report
@@ -157,12 +163,35 @@ class StaticCandidateEvaluator:
         return EvaluationOutcome(True, selected.candidate_id, scores=scores)
 
     def _evaluate_candidate(
-        self, artifact_path: str, candidate_id: str, evidence_root: Path
+        self, artifact_path: str, candidate_id: str, evidence_root: Path, spec_ir: Any
     ) -> dict[str, Any]:
         path = Path(artifact_path)
         results: dict[str, dict[str, Any]] = {}
         try:
-            for action in ("compile", "lint", "eval_quality"):
+            interface_result = check_rtl_interface(path, spec_ir)
+        except (OSError, UnicodeError, ValueError) as error:
+            interface_result = {
+                "status": "FAIL",
+                "category": "INTERFACE_MISMATCH",
+                "errors": [str(error)],
+            }
+        results["interface"] = interface_result
+        (evidence_root / f"{candidate_id}_interface.json").write_text(
+            json.dumps(interface_result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        if interface_result["status"] != "PASS":
+            return self._report(
+                candidate_id,
+                results,
+                accepted=False,
+                gate_stage="PATH_VALIDATED",
+                reason="interface gate failed",
+            )
+
+        try:
+            for action in ("lint", "compile", "eval_quality"):
                 result = self.runner.run(action, path)
                 results[action] = result
                 (evidence_root / f"{candidate_id}_{action}.json").write_text(
@@ -171,18 +200,76 @@ class StaticCandidateEvaluator:
                     newline="\n",
                 )
         except (DockerToolError, OSError) as error:
-            return {
-                "accepted": False,
-                "reason": str(error),
-                "quality_score": 0,
-                "results": results,
-            }
+            return self._report(
+                candidate_id,
+                results,
+                accepted=False,
+                gate_stage=self._gate_stage(results),
+                reason=str(error),
+            )
 
-        failed = [action for action, result in results.items() if result.get("status") != "PASS"]
-        quality_score = float(results["eval_quality"].get("metrics", {}).get("score", 0))
+        failed = [
+            action
+            for action in ("interface", "lint", "compile", "eval_quality")
+            if results.get(action, {}).get("status") != "PASS"
+        ]
+        metrics = results["eval_quality"].get("metrics", {})
+        quality_score = float(metrics.get("score", 0))
+        threshold = float(metrics.get("threshold", 75))
+        accepted = not failed and quality_score >= threshold
+        if failed:
+            reason = f"failed static gates: {', '.join(failed)}"
+        elif quality_score < threshold:
+            reason = f"static quality score {quality_score:g} is below threshold {threshold:g}"
+        else:
+            reason = ""
+        return self._report(
+            candidate_id,
+            results,
+            accepted=accepted,
+            gate_stage=self._gate_stage(results),
+            reason=reason,
+        )
+
+    @staticmethod
+    def _gate_stage(results: dict[str, dict[str, Any]]) -> str:
+        stage = "PATH_VALIDATED"
+        for action, passed_stage in (
+            ("interface", "INTERFACE_PASSED"),
+            ("lint", "LINT_PASSED"),
+            ("compile", "COMPILE_PASSED"),
+            ("eval_quality", "STATIC_SCORED"),
+        ):
+            if results.get(action, {}).get("status") != "PASS":
+                break
+            stage = passed_stage
+        return stage
+
+    @staticmethod
+    def _report(
+        candidate_id: str,
+        results: dict[str, dict[str, Any]],
+        *,
+        accepted: bool,
+        gate_stage: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        metrics = results.get("eval_quality", {}).get("metrics", {})
+        quality_score = float(metrics.get("score", 0))
+        threshold = float(metrics.get("threshold", 75))
+        scorecard = {
+            "candidate_id": candidate_id,
+            "static_quality_score": quality_score,
+            "threshold": threshold,
+            "is_acceptable": accepted,
+            "deductions": list(metrics.get("deductions", [])),
+            "gate_stage": gate_stage,
+            "config_version": str(metrics.get("config_version", "unknown")),
+        }
         return {
-            "accepted": not failed,
-            "reason": "" if not failed else f"failed static gates: {', '.join(failed)}",
+            "accepted": accepted,
+            "reason": reason,
             "quality_score": quality_score,
+            "scorecard": scorecard,
             "results": results,
         }

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.domain import Candidate, RTLTaskContext
+from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
 from verilog_agent.services import DockerEDARunner, DockerToolError, StaticCandidateEvaluator
 
 
@@ -21,7 +21,16 @@ def _tool_result(action: str, *, status: str = "PASS", score: int = 100) -> dict
         "returncode": 0 if status == "PASS" else 1,
         "duration_ms": 7,
         "errors": [],
-        "metrics": {"score": score} if action == "eval_quality" else {},
+        "metrics": (
+            {
+                "score": score,
+                "threshold": 75,
+                "config_version": "score-v1-test",
+                "deductions": [],
+            }
+            if action == "eval_quality"
+            else {}
+        ),
         "stdout": "",
         "stderr": "",
     }
@@ -45,10 +54,22 @@ class RecordingRunner:
 def _context_with_candidates(tmp_path: Path) -> tuple[RTLTaskContext, Path]:
     runs_root = tmp_path / "runs"
     context = RTLTaskContext(task_id="task_static", raw_spec="counter")
+    context.spec_ir = SpecIR(
+        module_name="counter",
+        raw_spec="counter",
+        ports=[
+            PortSpec("clk", PortDirection.INPUT),
+            PortSpec("count", PortDirection.OUTPUT, 4),
+        ],
+        clock="clk",
+    )
     for candidate_id in ("cand_01", "cand_02"):
         path = runs_root / context.task_id / "candidates" / candidate_id / "counter.v"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("module counter; endmodule\n", encoding="utf-8")
+        path.write_text(
+            "module counter(input wire clk, output reg [3:0] count); endmodule\n",
+            encoding="utf-8",
+        )
         context.candidates.append(
             Candidate(
                 candidate_id=candidate_id,
@@ -71,7 +92,10 @@ def test_static_evaluator_selects_highest_quality_passing_candidate(tmp_path: Pa
     assert len(runner.calls) == 6
     report = json.loads((runs_root / context.task_id / "static_evaluation.json").read_text())
     assert report["candidates"]["cand_01"]["accepted"] is True
+    assert report["candidates"]["cand_01"]["scorecard"]["config_version"] == "score-v1-test"
+    assert report["candidates"]["cand_01"]["scorecard"]["gate_stage"] == "STATIC_SCORED"
     assert (runs_root / context.task_id / "tool_runs" / "cand_02_lint.json").is_file()
+    assert (runs_root / context.task_id / "tool_runs" / "cand_02_interface.json").is_file()
 
 
 def test_static_evaluator_rejects_candidate_that_fails_a_gate(tmp_path: Path) -> None:
@@ -100,6 +124,36 @@ def test_static_evaluator_rejects_when_all_candidates_fail(tmp_path: Path) -> No
     assert outcome.accepted is False
     assert outcome.selected_candidate_id is None
     assert outcome.scores == {"cand_01": 0.0, "cand_02": 0.0}
+
+
+def test_static_evaluator_rejects_interface_mismatch_before_eda(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    Path(context.candidates[0].artifact_path).write_text(
+        "module wrong_name(input wire clk, output reg [3:0] count); endmodule\n",
+        encoding="utf-8",
+    )
+    runner = RecordingRunner({"cand_01": 100, "cand_02": 80})
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is True
+    assert outcome.selected_candidate_id == "cand_02"
+    assert not any(candidate_id == "cand_01" for candidate_id, _ in runner.calls)
+    report = context.candidates[0].metadata["static_evaluation"]
+    assert report["scorecard"]["gate_stage"] == "PATH_VALIDATED"
+    assert report["results"]["interface"]["category"] == "INTERFACE_MISMATCH"
+
+
+def test_static_evaluator_enforces_configured_threshold(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = RecordingRunner({"cand_01": 74, "cand_02": 75})
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.selected_candidate_id == "cand_02"
+    rejected = context.candidates[0].metadata["static_evaluation"]
+    assert rejected["accepted"] is False
+    assert "below threshold" in rejected["reason"]
 
 
 def test_docker_runner_rejects_artifacts_outside_runs_root(tmp_path: Path) -> None:

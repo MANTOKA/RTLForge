@@ -2,8 +2,11 @@
 
 ## 完整项目计划书 / 需求规格说明书（网页校正版）
 
-> 版本：v2.1（轻量化三 Agent 实现版）  
-> 编制日期：2026-08-19  
+> 版本：v2.2（当前进度、Memory 与正式评测版）
+>
+> 初版日期：2026-08-19
+>
+> 本次更新：2026-09-02
 > 权威依据：用户提供的 Gemini 公开分享页“Verilog Agent System Design”完整 36 页内容  
 > 项目仓库：`D:\AI\VerilogMulti\VerilogAgent`  
 > 说明：本文档不使用工作区内 `verilog_agent_main_program.pdf` 的内容。
@@ -40,6 +43,28 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 - 任务成功或终止后，后台记忆整理不阻塞前台任务。
 - 每次运行可追溯到模型配置、工具版本、评分配置和 Git commit。
 - 在固定 benchmark 上证明评分和记忆对通过率、迭代次数或成本具有正收益。
+
+### 1.5 当前实施状态（2026-09-02）
+
+本项目已经从方案阶段进入可运行原型阶段。下表以当前 Git 分支和测试结果为准，避免把计划功能误写成已完成功能。
+
+| 模块 | 状态 | 当前证据或边界 |
+|---|---|---|
+| Git/GitHub、CI 与工程基线 | 已完成 | 私有远端、`main`、Issue/PR 模板、`pyproject.toml`、Ruff/pytest 已建立 |
+| 安全 EDA 沙箱 | 已完成 | Dockerfile 集成 Icarus、Verilator、Yosys，具备非 root、路径检查、超时和结构化输出 |
+| `tool_wrapper.py` 五类动作 | 已完成 | `lint/compile/simulate/eval_quality/benchmark` 已实现统一 `ToolResult` |
+| 领域模型、状态机、事件与检查点 | 已完成 | `SpecIR/TaskTree/Candidate/RTLTaskContext`、SQLite 事件和恢复路径已实现 |
+| Fake 闭环 | 已完成 | 成功、修复、预算耗尽、取消和恢复场景已有测试 |
+| Real Planner Agent | 已完成第一版 | 严格结构化输出、本地校验、假设记录 |
+| Real Generator Agent | 已完成第一版 | 多候选、路径安全、内容哈希和去重 |
+| Candidate Evaluation Service | 功能分支已实现，待合并验收 | 已加入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据和评分有效性指标；完整 Docker 回归待镜像重建 |
+| Verification Service | 待完成 | 尚未把 testbench 仿真 verdict 正式接入真实 Orchestrator |
+| Debugger Agent 与 Reflection Router | 待完成 | 目前仅有接口/Fake 路径；应由真实验证失败稀疏触发 |
+| Memory 与 Consolidation Worker | 待完成 | 已有设计，尚无长期记忆实现和消融证据 |
+| API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
+| VerilogEval-Human v2 正式评测 | 部分完成 | 已验证本地 156 题 triplet 完整并建立 prompt/oracle/reference 可见性隔离；Verification harness 和冻结版本仍待完成 |
+
+当前非 Docker 快速回归结果为 `57 passed, 11 skipped`；11 项均为需显式启用 Docker 的集成测试。该结果证明 Python 层回归通过，不等于 156 题 RTL 功能评测通过。
 
 ---
 
@@ -974,3 +999,404 @@ v1.0.0
 12. 基准报告能够证明评分和记忆的实际收益及其限制。
 
 完成以上场景，项目才达到“轻量、高性能、可解释、可积累经验”的多 Agent RTL 系统目标。
+
+---
+
+## 22. 对 V2 项目书的落实性修改
+
+本节把前期评审建议固化为正式项目约束。
+
+### 22.1 保留三 Agent，而不是恢复为五个 LLM Agent
+
+Planner、Generator、Debugger 保留为 LLM Agent；Candidate Evaluation 与 Verification 保持确定性服务；Memory Consolidation 保持异步 Worker。五项专业职责均保留，但只有需要开放式推理的环节消耗模型调用。
+
+### 22.2 Debugger 改为按需稀疏触发
+
+简单 RTL 可能一次生成成功，因此 Debugger 不是固定流水线步骤。只有 Verification 返回可修复的 RTL 错误时才调用：
+
+```text
+PASS                         -> 直接完成
+SYNTAX/LINT/INTERFACE FAIL   -> Syntax Reflection -> Debugger
+FUNCTION/LATENCY/RESET FAIL  -> Functional Reflection -> Debugger
+TIMEOUT                      -> Deadlock/Termination Reflection -> Debugger
+SYSTEM/INFRASTRUCTURE FAIL   -> 不调用 Debugger，修复环境或终止
+```
+
+开发 Debugger 时不故意降低 Generator 质量。应从 VerilogEval-Human v2 和缺陷注入集收集真实失败，再按错误类别逐步实现修复能力。
+
+### 22.3 静态评分只用于候选排序，功能验证拥有最终裁决权
+
+StaticScore 不能证明 RTL 正确。候选必须经过 golden testbench 或项目 testbench 仿真；若排名第一的候选失败，应在候选预算内继续验证下一候选，不能仅凭静态分永久淘汰其他候选。
+
+评分创新需要证明两点：
+
+1. 静态评分能更早把功能正确或更易修复的候选排到前面。
+2. 它能减少仿真次数、修复轮数、token 或墙钟时间，而不降低最终通过率。
+
+### 22.4 Memory 必须晚于真实闭环
+
+长期记忆建立在真实验证证据上。实施顺序固定为：
+
+```text
+Verification Service
+ -> 真实失败数据
+ -> Debugger/Router
+ -> 可重放修复轨迹
+ -> Episodic Memory
+ -> Long-term Memory
+ -> Consolidation 与消融
+```
+
+不能从仅经 LLM 自评或静态评分的候选生成“成功经验”。
+
+### 22.5 区分研究成绩与产品质量
+
+Human v2 通过率用于研究比较，但不代表完整产品质量。产品还必须评价安全、稳定、延迟、成本、恢复、可解释性和用户可用性。
+
+---
+
+## 23. VerilogEval-Human v2 基准接入规范
+
+### 23.1 数据集与用途
+
+正式基准采用 NVlabs `verilog-eval` 主分支的 VerilogEval v2 `dataset_spec-to-rtl`，包含 156 个 Human Eval 问题。每题通常包含：
+
+```text
+*_prompt.txt   -> 规格输入
+*_test.sv      -> golden testbench / 评测 oracle
+*_ref.sv       -> 官方参考 RTL
+```
+
+仓库外已有 VerilogCoder 参考副本可用于研究核对，但正式评测应从官方仓库固定 commit 获取，并保留 MIT License。基准不得复制进产品核心包；建议用 Git submodule、下载脚本或外部只读目录管理。
+
+### 23.2 严格的可见性边界
+
+| 内容 | Planner | Generator | Debugger | Verification |
+|---|---:|---:|---:|---:|
+| `prompt.txt` | 可见 | 可见 | 可见相关规格 | 可见 |
+| `SpecIR/TaskTree` | 生成 | 可见 | 可见 | 可见 |
+| 生成 RTL | 不需要 | 生成 | 可见当前版本 | 可见 |
+| 结构化编译/仿真诊断 | 不可见 | 不可见 | 可见 | 生成 |
+| 精简 counterexample/波形摘要 | 不可见 | 不可见 | 可见 | 生成 |
+| 完整 `test.sv` | 不可见 | 不可见 | **不可见** | 可见 |
+| `ref.sv` 源码 | **不可见** | **不可见** | **不可见** | 仅作为 simulator black box |
+
+严禁把 golden testbench 实现、参考源码或逐题答案放入 prompt、Memory 或人工修复模板。
+
+### 23.3 两条评测协议
+
+为保证结果既能与公开工作比较，又能真实体现泛化能力，必须同时报告：
+
+#### Protocol A：Specification-only
+
+- Agent 只看到 prompt/规格。
+- `n=1` 时报告严格单次 Pass@1。
+- 允许生成多个候选时另报 pass@k，不把它称为 Pass@1。
+- 不允许 Debugger 使用 golden testbench 的具体反馈。
+- 用于评价 Planner + Generator 的一次生成能力。
+
+#### Protocol B：Oracle-assisted closed loop
+
+- Verification 可反复运行 golden testbench。
+- Debugger 只能看到结构化失败类别、编译诊断和受控 counterexample/波形摘要。
+- 报告最大候选数、最大修复轮数、仿真次数和总 token。
+- 结果命名为 `closed-loop success rate`，不得与普通 Pass@1 混写。
+
+VerilogCoder、MAGE 的高分涉及 provided golden testbench、仿真/波形反馈、候选搜索或迭代修复。与其比较时必须单列协议，不能只比较最终百分比。
+
+### 23.4 可复现性要求
+
+每次正式实验保存：
+
+- benchmark repository commit SHA；
+- 排除/异常题清单及理由；
+- Icarus、Verilator、Yosys 版本与 Docker image digest；
+- 模型提供商、精确模型版本和调用日期；
+- temperature、top-p、seed、候选数 `k`；
+- 最大修复轮数、最大工具调用数、token 和超时；
+- prompt/template、评分配置和 Memory snapshot 版本；
+- 本项目 Git commit SHA。
+
+### 23.5 基准预检
+
+在测试本系统前，先让官方 `ref.sv` 运行全部 `test.sv`：
+
+1. 编译全部 156 题。
+2. 执行并记录 PASS/FAIL/TIMEOUT。
+3. 标记端口不一致、工具版本不兼容和参考实现异常。
+4. 原始官方集合结果与修正/排除后结果分开报告。
+5. 不静默修改 benchmark。
+
+已知公开讨论曾报告部分 testbench 的声明顺序兼容、端口名不一致及少数参考实现超时问题，因此预检是正式评测的硬门槛。
+
+### 23.6 数据污染控制
+
+- 查询模型提供商是否声明训练截止和 benchmark 污染控制，但不把声明当作绝对证明。
+- 增加一个私有保留集或对 Human v2 规格做保持语义的变体集。
+- 不在开发 prompt 中使用具体 `ProbXXX` 参考答案。
+- 长期 Memory 的正式比较必须使用按题目隔离的构建方式：评测题自身及同构变体不得提前写入可检索 Memory。
+- 采用 leave-one-problem-out、按电路族分组或时间切分，防止 Memory 直接记住同题修复。
+
+---
+
+## 24. Memory 机制的正式实施方案
+
+### 24.1 MVP 数据模型
+
+`MemoryItem` 至少包含：
+
+```text
+memory_id
+memory_type
+summary
+error_signature
+module_family
+applicability_conditions
+recommended_action
+source_task_id
+source_candidate_id
+before_score / after_score
+verification_gate_reached
+toolchain_version
+evidence_hashes
+confidence
+positive_uses / negative_uses
+created_at / last_used_at
+status
+```
+
+### 24.2 写入门控
+
+长期 Memory 只有满足下列条件之一才能写入：
+
+- 修复使候选越过更高硬门槛；
+- 修复后通过功能仿真；
+- Human Intervention 经当前工具链重新验证成功；
+- 同一策略在至少两个非同题任务上产生正收益。
+
+失败尝试保留在任务内 Episodic Memory，用于审计和 no-progress 检测，但默认不进入正向检索。
+
+### 24.3 检索与注入
+
+检索顺序：元数据过滤 → FTS5/BM25 → 置信度/历史收益/版本匹配重排。默认最多返回 3 条，每条只包含适用条件、策略摘要和证据引用，不注入完整历史对话。
+
+各 Agent 使用范围：
+
+- Planner：Project Memory，已有模块和接口约束。
+- Generator：Design Pattern Memory，经过验证的结构范式。
+- Debugger：Error、Repair Strategy、Human Intervention Memory。
+
+### 24.4 防污染和遗忘
+
+- `memory_mode=off/read_only/read_write` 可配置。
+- 每条检索记录写入 `retrieval_trace`，便于判断是否真正被采用。
+- 使用后导致分数下降、错误阶段倒退或修复失败时记录负收益。
+- 负收益超过阈值自动降权或隔离，不直接物理删除。
+- 工具链或语言版本改变时降低旧 Memory 的版本匹配分。
+- 用户可查看、固定、禁用和删除长期 Memory。
+
+### 24.5 Memory 成功标准
+
+长期 Memory 不能仅以“检索到了内容”作为成功。至少满足：
+
+- 最终通过率不低于无 Memory 基线；
+- 平均修复轮数或 token/时间显著下降；
+- 负迁移率受控；
+- 对未见电路族仍有正收益；
+- 每条产生影响的 Memory 可追溯到验证证据。
+
+---
+
+## 25. 两个创新点的消融实验
+
+两个主要创新点定义为：
+
+1. **评分创新**：Static RTL Quality Score 驱动候选排序、验证顺序和修复接受/回滚。
+2. **记忆创新**：质量门控的分层 Memory 与异步 Consolidation。
+
+Adaptive Reflection Router 属于重要工程机制，应作为辅助消融项单独验证，不能把它带来的收益错误归因于评分或 Memory。
+
+### 25.1 主实验：2×2 因子设计
+
+在相同模型、候选数、修复预算和工具预算下运行：
+
+| 组别 | Scoring | Memory | 目的 |
+|---|---:|---:|---|
+| A 基线 | 关闭 | 关闭 | 随机或固定顺序候选 + 无历史知识 |
+| B 评分组 | 开启 | 关闭 | 测量评分独立贡献 |
+| C 记忆组 | 关闭 | 开启 | 测量 Memory 独立贡献 |
+| D 完整组 | 开启 | 开启 | 测量组合收益和交互效应 |
+
+分别计算：
+
+```text
+Scoring main effect = mean(B, D) - mean(A, C)
+Memory main effect  = mean(C, D) - mean(A, B)
+Interaction effect  = (D - C) - (B - A)
+```
+
+不能只比较 A 与 D，否则无法知道提升来自哪个创新点。
+
+### 25.2 评分内部消融
+
+- S0：无静态评分，候选按生成顺序验证。
+- S1：仅 compile/lint 硬门槛。
+- S2：硬门槛 + StaticScore 排序。
+- S3：S2 + score-delta 接受/回滚。
+- S4：S3 + Yosys 约束项。
+
+主要指标：候选 top-1 命中率、找到首个正确候选所需仿真次数、最终成功率、平均修复轮数、评分与功能正确性的 Spearman 相关、错误淘汰率。
+
+### 25.3 Memory 内部消融
+
+- M0：无 Memory。
+- M1：仅任务内 Episodic Memory。
+- M2：M1 + Error/Repair Strategy Memory。
+- M3：M2 + Design Pattern/Project Memory。
+- M4：M3 + Human Intervention Memory。
+- M5：M4 + Consolidation、降权和遗忘。
+
+主要指标：首次修复成功率、最终成功率、平均修复轮数、token、墙钟时间、检索采用率、正收益率、负迁移率、同类错误复发率。
+
+### 25.4 Router 辅助消融
+
+- R0：统一 Debugger prompt。
+- R1：按 Syntax/Functional/Timeout 分类 prompt。
+- R2：R1 + no-progress detection + rollback。
+
+用于证明分类修复机制，而不是混入两个核心创新的主效应。
+
+### 25.5 公平实验控制
+
+- 各组使用相同题目、模型版本、seed 集、候选数和最大修复次数。
+- Memory 组额外使用的检索和模型 token 必须计入成本。
+- 每题至少运行多个 seed；报告均值、标准差和 95% 置信区间。
+- 对配对二元通过结果可使用 McNemar 检验或配对 bootstrap；对轮数/token 使用配对 bootstrap/Wilcoxon。
+- 报告失败分类，不只报告单个总分。
+- 同时报告成功率与成本的 Pareto 前沿，防止以大量采样换取少量通过率提升。
+
+---
+
+## 26. 最终成品效果评价体系
+
+### 26.1 研究效果
+
+| 维度 | 核心指标 | v1.0 建议验收目标 |
+|---|---|---|
+| 一次生成能力 | Specification-only Pass@1 | 相对同模型直接生成基线有稳定提升 |
+| 候选搜索 | pass@2/pass@3、首个正确候选位置 | 报告收益与额外成本，不设虚假绝对目标 |
+| 闭环修复 | Oracle-assisted success rate | 明显高于无 Debugger 基线 |
+| 修复效率 | 平均/中位修复轮数 | 成功任务中位数不超过 2 轮 |
+| 评分有效性 | top-1 selection accuracy、仿真节省 | 优于随机/生成顺序并不降低最终成功率 |
+| Memory 有效性 | 成功率、轮数、token、负迁移 | 至少一项效率显著改善，成功率不退化 |
+
+绝对通过率目标应在完成首轮 156 题 baseline 后制定；在没有基线数据前不预设“必须达到 95%”，避免用目标倒逼测试泄漏或无限采样。
+
+### 26.2 功能与正确性
+
+- 所有“verified”结果都有 testbench 证据。
+- 接口、lint、compile、simulation verdict 一致且可重放。
+- Debugger 不修改 oracle，不越过预算，不覆盖最佳候选。
+- 失败任务返回最优候选、失败阶段和可执行说明。
+- Yosys 指标不被误称为真实工艺 PPA。
+
+### 26.3 性能与成本
+
+- 端到端延迟 P50/P95。
+- LLM 请求数、输入/输出 token 和估算费用。
+- EDA 调用数、CPU 时间、峰值内存和产物大小。
+- 简单任务在首个候选通过后早停。
+- 两任务并发无文件污染；取消和超时能及时释放资源。
+
+### 26.4 稳定性与安全
+
+- 24 小时压力测试成功率。
+- 服务重启后的任务恢复率。
+- 超时任务和异常容器清理率。
+- 路径穿越、网络访问、fork bomb、超大日志测试。
+- 密钥不进入日志、事件、Memory 和下载包。
+
+### 26.5 产品可用性
+
+- 新用户能按文档通过 Docker Compose 启动。
+- 从输入需求到下载 RTL 的任务完成率和用时。
+- UI 能解释规格假设、候选分数、验证证据、修复 diff 和 Memory 来源。
+- 采用 5-10 名目标用户完成任务测试，记录成功率、阻塞点和 SUS/简化满意度问卷。
+
+### 26.6 发布门禁
+
+发布 v1.0 前必须同时满足：
+
+1. Python 单元/集成/端到端测试通过。
+2. Docker 集成测试在 CI 或固定机器运行，而不是长期 skip。
+3. Human v2 两条协议均有可复现报告。
+4. 两个创新点完成消融，且没有明显负收益被隐藏。
+5. 私有保留集无明显崩塌。
+6. 安全、恢复和一键启动验收通过。
+
+---
+
+## 27. 提升测试通过率与项目质量的路线
+
+### 27.1 优先提升正确率，而非单纯增加 Agent
+
+按预期收益排序：
+
+1. **加强 SpecIR**：明确端口、位宽、signedness、复位、周期延迟、优先级和边界条件。
+2. **接口门禁前置**：生成后立即做模块名、端口和位宽检查，减少无效仿真。
+3. **提高候选差异性**：要求结构差异而非只改变变量名；默认 2 个，复杂任务按预算升至 3 个。
+4. **真实 Verification**：先建立可靠 oracle 和 failure taxonomy，再实现 Debugger。
+5. **类别化 Debugger**：从 syntax/interface 开始，再扩展 reset/latency/FSM/handshake。
+6. **Counterexample 最小化**：只提供首个失败周期、相关信号和期望/实际值，降低上下文噪声。
+7. **回滚与早停**：修复必须通过 score/gate 改善才接受，重复错误立即停止。
+8. **质量门控 Memory**：只复用被验证且跨任务有效的策略。
+
+### 27.2 建立三套测试集
+
+- `smoke`：10-20 个快速任务，每次提交运行。
+- `regression`：覆盖错误类别和真实历史缺陷，每日/每个 PR 运行。
+- `benchmark`：固定 Human v2 + 私有保留集，只在正式实验和发布运行。
+
+Human v2 不应用作反复调 prompt 的唯一开发集。应划分开发子集、验证子集和冻结报告集，或使用题族交叉验证。
+
+### 27.3 失败驱动改进循环
+
+```text
+运行固定评测
+ -> 生成 failure taxonomy 报告
+ -> 找最大失败类别
+ -> 提出单一改动
+ -> 单元/回归验证
+ -> 全量 A/B
+ -> 保留有统计收益的改动
+ -> 记录 ADR 与实验结果
+```
+
+一次只改变一个主要变量，避免无法归因。
+
+### 27.4 代码与工程质量
+
+- 强化类型边界和 schema 版本。
+- 核心领域逻辑保持纯函数，便于测试。
+- Provider、Docker 和存储全部通过接口适配。
+- 评分规则、prompt 和 benchmark 配置进入版本控制。
+- 每个 Bug 都增加最小回归用例。
+- 对测试 skip 设置发布阻断规则，避免 Docker 路径长期未验证。
+- 定期检查依赖、许可证、镜像漏洞和日志脱敏。
+
+### 27.5 更新后的近期任务顺序
+
+```text
+1. 合并并验收 Candidate Evaluation Service
+2. 实现 Verification Service + Human v2 harness 预检
+3. 运行无 Debugger baseline，形成真实失败分类
+4. 实现稀疏 Debugger + Adaptive Reflection Router
+5. 运行 Debugger/Router 消融
+6. 实现 Episodic Memory 和可重放修复轨迹
+7. 实现质量门控长期 Memory + Consolidation
+8. 完成 2×2 Scoring×Memory 主消融与内部消融
+9. 构建 API/UI/Compose
+10. 运行 Human v2 双协议、私有保留集和产品验收
+```
+
+这一顺序确保每个新模块都有前一阶段产生的真实数据和客观验收标准，而不是先实现复杂机制，再寻找能够证明它有用的案例。

@@ -3,14 +3,17 @@
 ## 目的与边界
 
 这个阶段把生成的每个 RTL 候选交给确定性的 Docker EDA 沙盒，而不是让 LLM 自己宣称“通过”。
-每个候选依次运行：
+每个候选依次执行：
 
-1. `compile`：Icarus Verilog 编译；
-2. `lint`：Verilator 静态检查；
-3. `eval_quality`：确定性静态质量评分。
+1. `interface`：对照 `SpecIR` 检查模块名、端口名称、方向和位宽；
+2. `lint`：Verilator 静态检查，错误是硬门槛，警告进入扣分项；
+3. `compile`：Icarus Verilog 编译；
+4. `eval_quality`：按版本化配置生成静态质量分和逐条扣分证据。
 
-只有三项都通过的候选才有资格被选择。先按质量分降序排序，分数相同时按候选编号升序选择，
-所以结果可重复。
+只有硬门槛全部通过且静态分达到阈值的候选才有资格被选择。先按质量分降序排序，分数相同时
+按候选编号升序选择，所以结果可重复。初始权重位于
+`config/static_score_v1.json`，包括配置版本、阈值和每种 Verilator 诊断的扣分；这些权重是待用
+benchmark 校准的初始假设，不是已经证明的研究结论。
 
 这不是功能验证：没有自动 testbench 时，系统不会运行 `simulate`，也不会声称 RTL 功能正确。
 演示会停在 `VERIFYING`，并显示 `verified_rtl: false`。下一阶段才是自动 testbench、仿真、
@@ -47,12 +50,27 @@ docker image inspect verilog-agent-sandbox:latest
 
 ```text
 tool_runs/
+├── cand_01_interface.json
 ├── cand_01_compile.json
 ├── cand_01_lint.json
 ├── cand_01_eval_quality.json
 └── ...
 static_evaluation.json
 showcase_summary.json
+```
+
+`static_evaluation.json` 中每个候选包含项目书规定的 `ScoreCard`：
+
+```json
+{
+  "candidate_id": "cand_02",
+  "static_quality_score": 88,
+  "threshold": 75,
+  "is_acceptable": true,
+  "deductions": [],
+  "gate_stage": "STATIC_SCORED",
+  "config_version": "score-v1"
+}
 ```
 
 终端会显示每个候选的通过状态、质量分、工具、耗时和错误类别，并显示
