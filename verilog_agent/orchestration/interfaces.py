@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from verilog_agent.domain.models import (
     Candidate,
@@ -21,6 +21,10 @@ class Generator(Protocol):
 
 class Debugger(Protocol):
     def repair(self, context: RTLTaskContext, candidate: Candidate) -> Candidate: ...
+
+
+class ReflectionRouter(Protocol):
+    def route(self, category: str | None, feedback: dict[str, Any] | None = None) -> Any: ...
 
 
 class CandidateEvaluator(Protocol):

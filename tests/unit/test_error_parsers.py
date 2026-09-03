@@ -1,4 +1,9 @@
-from tool_wrapper import parse_iverilog, parse_verilator, score_diagnostics
+from tool_wrapper import (
+    _classify_command_failure,
+    parse_iverilog,
+    parse_verilator,
+    score_diagnostics,
+)
 
 
 def test_parse_iverilog_syntax_error_without_explicit_severity() -> None:
@@ -36,6 +41,25 @@ def test_parse_verilator_width_diagnostic() -> None:
             "message": "Width mismatch",
         }
     ]
+
+
+def test_verilator_unsupported_construct_is_tool_incompatibility() -> None:
+    result = {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": (
+            "%Error-BLKLOOPINIT: predictor.v:30:24: Unsupported: "
+            "Delayed assignment to array inside for loops\n"
+        ),
+        "timed_out": False,
+        "system_error": None,
+        "duration_ms": 3,
+    }
+
+    classified = _classify_command_failure("LINT", result, "verilator", "LINT_ERROR")
+
+    assert classified["category"] == "TOOL_INCOMPATIBILITY"
+    assert classified["errors"][0]["type"] == "BLKLOOPINIT"
 
 
 def test_score_diagnostics_uses_versioned_rule_weights() -> None:

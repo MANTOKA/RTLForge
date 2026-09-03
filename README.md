@@ -23,11 +23,13 @@ The Phase 2 implementation now includes versioned domain models, an explicit tas
 machine, SQLite events/checkpoints, budgets, cancellation, deterministic Fake Agents, and
 real model-backed Planner and Generator implementations. The real agents use an
 OpenAI-compatible Responses endpoint with strict structured output. Deterministic candidate
-evaluation and first-pass golden-testbench verification are implemented; the real Debugger and
-browser UI are later slices. See
+evaluation, golden-testbench verification, the deterministic Adaptive Reflection Router, and
+the first real Debugger repair path are implemented; the browser UI is a later slice. See
 [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
 [`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md). A step-by-step Chinese demonstration guide is
 available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
+The first Human v2 development baseline and repair evidence are recorded in
+[`docs/HUMAN_V2_DEV_BASELINE_ZH.md`](docs/HUMAN_V2_DEV_BASELINE_ZH.md).
 
 ## Intended product
 
@@ -122,6 +124,10 @@ Human v2 dataset integrity/reference preflight and one-case model-backed verific
 documented in [`docs/VERIFICATION_HUMAN_V2_ZH.md`](docs/VERIFICATION_HUMAN_V2_ZH.md). The benchmark
 remains external to the product repository, and golden testbench/reference source is never sent
 to Planner, Generator, or Debugger.
+
+To enable sparse real Debugger repair for a Human v2 case, add `--max-repairs 1` (up to 3).
+The Debugger is called only after a repairable deterministic failure; system/tool failures never
+trigger an RTL edit.
 
 Repository configuration, logging, generated-artifact, and contribution conventions are
 defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in

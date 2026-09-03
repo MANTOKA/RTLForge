@@ -57,14 +57,14 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 | Fake 闭环 | 已完成 | 成功、修复、预算耗尽、取消和恢复场景已有测试 |
 | Real Planner Agent | 已完成第一版 | 严格结构化输出、本地校验、假设记录 |
 | Real Generator Agent | 已完成第一版 | 多候选、路径安全、内容哈希和去重 |
-| Candidate Evaluation Service | 功能分支已实现，待合并验收 | 已加入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据和评分有效性指标；完整 Docker 回归待镜像重建 |
-| Verification Service | 第一版已实现并完成单题闭环 | 支持 golden testbench、按评分顺序回退、证据报告、失败分类和受控 Debugger feedback；`Prob001_zero` 已到达 `verified_rtl=true` |
-| Debugger Agent 与 Reflection Router | 待完成 | 目前仅有接口/Fake 路径；应由真实验证失败稀疏触发 |
+| Candidate Evaluation Service | 功能分支已实现，待合并验收 | 已加入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据；`TOOL_INCOMPATIBILITY` 不再误拒绝可由 Icarus 验证的 RTL |
+| Verification Service | 第一版已实现并完成开发集复核 | 支持 golden testbench、按评分顺序回退、证据报告和受控反馈；已修复非零 `Mismatches` 被误判 PASS 的漏洞 |
+| Debugger Agent 与 Reflection Router | 第一版已实现，待合并验收 | 支持 Syntax/Functional/Timeout/Requirement/Infrastructure 确定性路由、新 child candidate、可审计 diff、重评分与复验 |
 | Memory 与 Consolidation Worker | 待完成 | 已有设计，尚无长期记忆实现和消融证据 |
 | API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
 | VerilogEval-Human v2 正式评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；模型基线与冻结版本仍待完成 |
 
-当前非 Docker 快速回归结果为 `66 passed, 11 skipped`；显式复用本地 EDA 镜像运行时，11 项 Docker 集成测试为 `11 passed`。该结果证明软件与工具链回归通过，不等于 156 题 Agent 生成功能评测通过。
+当前非 Docker 快速回归结果为 `77 passed, 12 skipped`；显式复用本地 EDA 镜像运行时，12 项 Docker 集成测试为 `12 passed`。固定 10 题开发集的 20 个候选经修正后裁决器复核均为 0 mismatch；困难扩展集的 `Prob154`、`Prob155` 暴露真实功能失败。该结果证明开发闭环和工具链回归，不等于 156 题正式 Agent 评测成绩。
 
 ---
 

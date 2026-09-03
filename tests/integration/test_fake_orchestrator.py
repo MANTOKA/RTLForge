@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verilog_agent.domain import Budget, EventType, TaskStage
+from verilog_agent.domain import Budget, EvaluationOutcome, EventType, TaskStage
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
 from verilog_agent.testing import (
     FakeDebugger,
@@ -61,6 +61,7 @@ def test_fake_debugger_repairs_one_failure(tmp_path: Path) -> None:
     event_types = _event_types(orchestrator.store, result.task_id)
     assert EventType.REPAIR_PROPOSED in event_types
     assert EventType.PATCH_ACCEPTED in event_types
+    assert EventType.REFLECTION_ROUTED in event_types
 
 
 def test_repair_budget_exhaustion_fails_and_rolls_back(tmp_path: Path) -> None:
@@ -111,3 +112,40 @@ def test_new_process_can_resume_from_checkpoint(tmp_path: Path) -> None:
     assert recovered.spec_ir is not None
     assert result.current_stage is TaskStage.COMPLETED
     assert result.checkpoint_version > recovered_version
+
+
+class _RejectSyntaxOnce(FakeEvaluator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def evaluate(self, context):
+        self.calls += 1
+        if self.calls == 1:
+            return EvaluationOutcome(
+                accepted=False,
+                selected_candidate_id="cand_01",
+                reason="compile failed",
+                category="SYNTAX_ERROR",
+            )
+        return super().evaluate(context)
+
+
+def test_static_syntax_failure_routes_to_debugger(tmp_path: Path) -> None:
+    evaluator = _RejectSyntaxOnce()
+    orchestrator = Orchestrator(
+        planner=FakePlanner(),
+        generator=FakeGenerator(),
+        debugger=FakeDebugger(),
+        evaluator=evaluator,
+        verifier=FakeVerifier(),
+        store=SQLiteTaskStore(tmp_path / "static-repair.sqlite"),
+    )
+    context = orchestrator.create_task("Create a counter", task_id="task_static_repair")
+
+    result = orchestrator.run_task(context.task_id)
+
+    assert result.current_stage is TaskStage.COMPLETED
+    assert result.budget.repair_attempts == 1
+    assert result.metadata["reflection_decision"]["policy"] == "SYNTAX_REFLECTION"
+    assert EventType.REFLECTION_ROUTED in _event_types(orchestrator.store, result.task_id)

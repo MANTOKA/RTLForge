@@ -6,6 +6,12 @@ from verilog_agent.services.candidate_evaluation import (
     MultiFileEDARunner,
     StaticCandidateEvaluator,
 )
+from verilog_agent.services.reflection_router import (
+    AdaptiveReflectionRouter,
+    ReflectionAction,
+    ReflectionDecision,
+    ReflectionPolicy,
+)
 from verilog_agent.services.verification import GoldenTestbenchVerificationService
 
 __all__ = [
@@ -14,4 +20,8 @@ __all__ = [
     "GoldenTestbenchVerificationService",
     "MultiFileEDARunner",
     "StaticCandidateEvaluator",
+    "AdaptiveReflectionRouter",
+    "ReflectionAction",
+    "ReflectionDecision",
+    "ReflectionPolicy",
 ]

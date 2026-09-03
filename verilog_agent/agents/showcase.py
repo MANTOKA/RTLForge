@@ -10,6 +10,7 @@ from verilog_agent.agents.generator import ArtifactRepository, RealGenerator
 from verilog_agent.agents.planner import RealPlanner
 from verilog_agent.domain import Budget, RTLTaskContext, TaskStage, TaskTreeNode
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
+from verilog_agent.orchestration.interfaces import Debugger
 from verilog_agent.providers import StructuredModelProvider
 from verilog_agent.services import (
     GoldenTestbenchVerificationService,
@@ -46,6 +47,7 @@ class PlannerGeneratorShowcase:
         runs_root: Path,
         evaluator: StaticCandidateEvaluator | None = None,
         verifier: GoldenTestbenchVerificationService | None = None,
+        debugger: Debugger | None = None,
         emit: Callable[[str], None] = print,
     ) -> None:
         self.provider = provider
@@ -54,9 +56,16 @@ class PlannerGeneratorShowcase:
         self.runs_root = runs_root
         self.evaluator = evaluator
         self.verifier = verifier
+        self.debugger = debugger
         self.emit = emit
 
-    def run(self, raw_spec: str, *, candidate_count: int = 2) -> dict:
+    def run(
+        self,
+        raw_spec: str,
+        *,
+        candidate_count: int = 2,
+        max_repairs: int = 0,
+    ) -> dict:
         store = SQLiteTaskStore(self.database)
         stop_after_generation = _StopAfterGeneration()
         orchestrator = Orchestrator(
@@ -64,14 +73,14 @@ class PlannerGeneratorShowcase:
             generator=RealGenerator(
                 self.provider, artifacts=ArtifactRepository(self.runs_root)
             ),
-            debugger=stop_after_generation,
+            debugger=self.debugger or stop_after_generation,
             evaluator=self.evaluator or stop_after_generation,
             verifier=self.verifier or stop_after_generation,
             store=store,
         )
         context = orchestrator.create_task(
             raw_spec,
-            budget=Budget(max_candidates=candidate_count, max_repairs=0),
+            budget=Budget(max_candidates=candidate_count, max_repairs=max_repairs),
         )
         task_root = self.runs_root / context.task_id
         task_root.mkdir(parents=True, exist_ok=True)
@@ -118,6 +127,7 @@ class PlannerGeneratorShowcase:
         static_evaluation: dict | None = None
         verification: dict | None = None
         verification_ms: int | None = None
+        repair_ms: int | None = None
         evaluator_ms: int | None = None
         if self.evaluator is not None:
             self._heading("阶段 3：Candidate Evaluation 正在执行 Docker 静态门禁")
@@ -153,8 +163,35 @@ class PlannerGeneratorShowcase:
                     "下一步才会稀疏触发 Debugger。"
                 )
 
+        if context.current_stage is TaskStage.CLASSIFYING and self.debugger is not None:
+            self._heading("阶段 5：Adaptive Reflection Router / Debugger 修复闭环")
+            started = perf_counter()
+            orchestrator.run_task(context.task_id)
+            repair_ms = round((perf_counter() - started) * 1000)
+            decision = context.metadata.get("reflection_decision", {})
+            if decision:
+                self.emit(f"reflection_policy: {decision.get('policy')}")
+                self.emit(f"reflection_action: {decision.get('action')}")
+            for candidate in context.candidates:
+                if candidate.parent_id is not None:
+                    self.emit(
+                        f"repair: {candidate.candidate_id} <- {candidate.parent_id}; "
+                        f"diff={candidate.metadata.get('diff_path', '(none)')}"
+                    )
+            self.emit(f"Repair loop elapsed: {repair_ms} ms")
+            if context.current_stage is TaskStage.COMPLETED:
+                self.emit(f"verified_rtl: true，修复后候选为 {context.selected_candidate_id}")
+            else:
+                self.emit(
+                    f"verified_rtl: false，闭环停止于 {context.current_stage.value}；"
+                    f"类别为 {context.failure_category}"
+                )
+            report_path = context.metadata.get("verification_report")
+            if report_path:
+                verification = json.loads(Path(report_path).read_text(encoding="utf-8"))
+
         events = store.list_events(context.task_id)
-        self._heading("阶段 5：Orchestrator 事件轨迹")
+        self._heading("阶段 6：Orchestrator 事件轨迹")
         for event in events:
             self.emit(
                 f"{event.sequence:02d}. {event.event_type.value} "
@@ -174,6 +211,7 @@ class PlannerGeneratorShowcase:
                 "generator": generator_ms,
                 "candidate_evaluation": evaluator_ms,
                 "verification": verification_ms,
+                "repair_loop": repair_ms,
             },
             "spec_ir": context.spec_ir.to_dict(),
             "task_tree": context.task_tree_root.to_dict(),
@@ -194,8 +232,10 @@ class PlannerGeneratorShowcase:
             self.emit("下一步尚未执行：候选评分、EDA 验证和 Debugger 修复。")
         elif self.verifier is not None and context.current_stage is TaskStage.COMPLETED:
             self.emit("本次候选已通过指定 golden testbench；未触发 Debugger。")
-        elif self.verifier is not None:
+        elif self.verifier is not None and self.debugger is None:
             self.emit("下一步尚未执行：按结构化失败类别调用真实 Debugger。")
+        elif self.verifier is not None:
+            self.emit("真实 Debugger 闭环已结束；结果与 diff 见完整摘要和候选目录。")
         else:
             self.emit("下一步尚未执行：testbench 仿真、失败分类和 Debugger 修复。")
         return summary

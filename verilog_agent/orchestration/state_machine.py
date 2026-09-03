@@ -27,7 +27,12 @@ ALLOWED_TRANSITIONS: dict[TaskStage, frozenset[TaskStage]] = {
         {TaskStage.EVALUATING, TaskStage.CANCELLED, TaskStage.FAILED}
     ),
     TaskStage.EVALUATING: frozenset(
-        {TaskStage.VERIFYING, TaskStage.CANCELLED, TaskStage.FAILED}
+        {
+            TaskStage.VERIFYING,
+            TaskStage.CLASSIFYING,
+            TaskStage.CANCELLED,
+            TaskStage.FAILED,
+        }
     ),
     TaskStage.VERIFYING: frozenset(
         {

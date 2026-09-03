@@ -175,6 +175,8 @@ class EvaluationOutcome:
     selected_candidate_id: str | None
     scores: dict[str, float] = field(default_factory=dict)
     reason: str = ""
+    category: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
