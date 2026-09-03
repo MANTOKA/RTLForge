@@ -102,21 +102,26 @@ class OpenAIResponsesProvider:
         schema_name: str,
         schema: dict[str, Any],
     ) -> dict[str, Any]:
-        response = self._client.responses.create(
-            model=self.settings.model,
-            instructions=instructions,
-            input=input_text,
-            max_output_tokens=self.settings.max_output_tokens,
-            store=False,
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": schema_name,
-                    "schema": schema,
-                    "strict": True,
-                }
-            },
-        )
+        try:
+            response = self._client.responses.create(
+                model=self.settings.model,
+                instructions=instructions,
+                input=input_text,
+                max_output_tokens=self.settings.max_output_tokens,
+                store=False,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": schema_name,
+                        "schema": schema,
+                        "strict": True,
+                    }
+                },
+            )
+        except Exception as error:
+            raise ModelProviderError(
+                f"provider request failed: {type(error).__name__}: {error}"
+            ) from error
         output_text = getattr(response, "output_text", None)
         if not isinstance(output_text, str) or not output_text.strip():
             status = getattr(response, "status", "unknown")

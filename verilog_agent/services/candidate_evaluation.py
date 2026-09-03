@@ -170,7 +170,13 @@ class StaticCandidateEvaluator:
         reports: dict[str, dict[str, Any]] = {}
         scores: dict[str, float] = {}
 
-        for candidate in context.candidates:
+        candidates = context.candidates
+        if context.selected_candidate_id is not None:
+            selected = context.candidate()
+            if selected.parent_id is not None:
+                candidates = [selected]
+
+        for candidate in candidates:
             report = self._evaluate_candidate(
                 candidate.artifact_path,
                 candidate.candidate_id,
@@ -193,14 +199,31 @@ class StaticCandidateEvaluator:
         )
         accepted = [
             candidate
-            for candidate in context.candidates
+            for candidate in candidates
             if reports[candidate.candidate_id]["eligible_for_verification"]
         ]
         if not accepted:
             reasons = "; ".join(
                 f"{candidate_id}: {report['reason']}" for candidate_id, report in reports.items()
             )
-            return EvaluationOutcome(False, None, scores=scores, reason=reasons)
+            failed_candidate = max(
+                candidates,
+                key=lambda item: (
+                    self._gate_rank(reports[item.candidate_id]["scorecard"]["gate_stage"]),
+                    scores[item.candidate_id],
+                    item.candidate_id,
+                ),
+            )
+            category = self._failure_category(reports[failed_candidate.candidate_id])
+            context.metadata["static_evaluation_report"] = str(report_path)
+            return EvaluationOutcome(
+                False,
+                failed_candidate.candidate_id,
+                scores=scores,
+                reason=reasons,
+                category=category,
+                details={"report_path": str(report_path)},
+            )
 
         ranked = sorted(
             accepted,
@@ -214,6 +237,25 @@ class StaticCandidateEvaluator:
         context.metadata["static_evaluation_report"] = str(report_path)
         selected = ranked[0]
         return EvaluationOutcome(True, selected.candidate_id, scores=scores)
+
+    @staticmethod
+    def _gate_rank(stage: str) -> int:
+        return {
+            "PATH_VALIDATED": 0,
+            "INTERFACE_PASSED": 1,
+            "LINT_PASSED": 2,
+            "COMPILE_PASSED": 3,
+            "STATIC_SCORED": 4,
+        }.get(stage, -1)
+
+    @staticmethod
+    def _failure_category(report: dict[str, Any]) -> str:
+        results = report.get("results", {})
+        for action in ("interface", "compile", "lint", "eval_quality"):
+            result = results.get(action, {})
+            if result.get("status") != "PASS":
+                return str(result.get("category") or "SYSTEM_ERROR")
+        return "QUALITY_ERROR"
 
     def _evaluate_candidate(
         self, artifact_path: str, candidate_id: str, evidence_root: Path, spec_ir: Any
@@ -263,10 +305,15 @@ class StaticCandidateEvaluator:
                 reason=str(error),
             )
 
+        incompatible = [
+            action
+            for action in ("lint", "eval_quality")
+            if results.get(action, {}).get("category") == "TOOL_INCOMPATIBILITY"
+        ]
         failed = [
             action
             for action in ("interface", "lint", "compile", "eval_quality")
-            if results.get(action, {}).get("status") != "PASS"
+            if results.get(action, {}).get("status") != "PASS" and action not in incompatible
         ]
         metrics = results["eval_quality"].get("metrics", {})
         quality_score = float(metrics.get("score", 0))
@@ -275,6 +322,11 @@ class StaticCandidateEvaluator:
         accepted = hard_gates_passed and quality_score >= threshold
         if failed:
             reason = f"failed static gates: {', '.join(failed)}"
+        elif incompatible:
+            reason = (
+                "Verilator tool incompatibility bypassed; Icarus compile passed and "
+                "functional verification remains mandatory"
+            )
         elif quality_score < threshold:
             reason = f"static quality score {quality_score:g} is below threshold {threshold:g}"
         else:

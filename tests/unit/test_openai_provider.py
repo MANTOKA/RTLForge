@@ -22,6 +22,11 @@ class RecordingResponses:
         return SimpleNamespace(output_text=self.output_text, status="completed")
 
 
+class FailingResponses:
+    def create(self, **_kwargs):
+        raise ConnectionError("upstream disconnected")
+
+
 def test_provider_sends_strict_non_stored_responses_request() -> None:
     responses = RecordingResponses()
     client = SimpleNamespace(responses=responses)
@@ -58,6 +63,21 @@ def test_provider_rejects_missing_or_invalid_structured_output(output_text: str 
     with pytest.raises(ModelProviderError):
         provider.generate_structured(
             instructions="plan",
+            input_text="counter",
+            schema_name="answer",
+            schema={"type": "object"},
+        )
+
+
+def test_provider_wraps_transport_failure_as_model_provider_error() -> None:
+    client = SimpleNamespace(responses=FailingResponses())
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="secret", model="model"), client=client
+    )
+
+    with pytest.raises(ModelProviderError, match="ConnectionError"):
+        provider.generate_structured(
+            instructions="repair",
             input_text="counter",
             schema_name="answer",
             schema={"type": "object"},

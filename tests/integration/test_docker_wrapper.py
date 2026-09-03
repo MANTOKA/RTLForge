@@ -216,6 +216,16 @@ def test_zero_exit_fail_text_is_not_treated_as_pass(docker_image: str) -> None:
 
 
 @pytest.mark.integration
+def test_zero_exit_nonzero_mismatch_count_is_not_treated_as_pass(
+    docker_image: str,
+) -> None:
+    result = _wrapper(docker_image, "simulate", "tb_mismatch_count.v")
+
+    assert result["status"] == "FAIL"
+    assert result["category"] == "ASSERTION_FAILURE"
+
+
+@pytest.mark.integration
 def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> None:
     result = _wrapper(docker_image, "eval_quality", "counter.v")
 

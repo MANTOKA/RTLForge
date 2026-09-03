@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from verilog_agent.agents.debugger import RealDebugger
+from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
 from verilog_agent.benchmarks.verilogeval import load_human_v2
 from verilog_agent.providers import (
@@ -46,6 +48,13 @@ def main() -> None:
     parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
+    parser.add_argument(
+        "--max-repairs",
+        type=int,
+        choices=(0, 1, 2, 3),
+        default=0,
+        help="Enable the real routed Debugger with this maximum repair count",
+    )
     parser.add_argument(
         "--static-evaluation",
         action="store_true",
@@ -102,6 +111,8 @@ def main() -> None:
         args.testbench = benchmark_case.testbench_path
     if args.testbench is not None and not args.static_evaluation:
         parser.error("functional verification requires --static-evaluation")
+    if args.max_repairs and args.testbench is None:
+        parser.error("--max-repairs requires a golden --testbench or Human v2 case")
 
     if args.offline_example:
         if args.env_file is not None or args.check_config:
@@ -174,9 +185,18 @@ def main() -> None:
             if runner is not None and args.testbench is not None
             else None
         ),
+        debugger=(
+            RealDebugger(provider, artifacts=ArtifactRepository(args.runs_root))
+            if args.max_repairs
+            else None
+        ),
     )
     try:
-        showcase.run(raw_spec, candidate_count=args.candidates)
+        showcase.run(
+            raw_spec,
+            candidate_count=args.candidates,
+            max_repairs=args.max_repairs,
+        )
     except ShowcaseRunError as error:
         parser.exit(1, f"showcase error: {error}\n")
 

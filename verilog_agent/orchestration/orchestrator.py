@@ -10,10 +10,16 @@ from verilog_agent.orchestration.interfaces import (
     Debugger,
     Generator,
     Planner,
+    ReflectionRouter,
     Verifier,
 )
 from verilog_agent.orchestration.state_machine import transition
 from verilog_agent.orchestration.storage import SQLiteTaskStore
+from verilog_agent.providers import ModelProviderError
+from verilog_agent.services.reflection_router import (
+    AdaptiveReflectionRouter,
+    ReflectionAction,
+)
 
 
 class Orchestrator:
@@ -29,6 +35,7 @@ class Orchestrator:
         verifier: Verifier,
         store: SQLiteTaskStore,
         event_bus: EventBus | None = None,
+        router: ReflectionRouter | None = None,
     ) -> None:
         self.planner = planner
         self.generator = generator
@@ -37,6 +44,7 @@ class Orchestrator:
         self.verifier = verifier
         self.store = store
         self.event_bus = event_bus or EventBus(store)
+        self.router = router or AdaptiveReflectionRouter()
         self._contexts: dict[str, RTLTaskContext] = {}
 
     def create_task(
@@ -80,7 +88,9 @@ class Orchestrator:
 
     def run_task(self, task_id: str) -> RTLTaskContext:
         context = self._context(task_id)
-        while not context.current_stage.is_terminal:
+        while not context.current_stage.is_terminal and (
+            context.current_stage is not TaskStage.WAITING_FOR_USER
+        ):
             self.advance_task(task_id)
         return context
 
@@ -96,6 +106,8 @@ class Orchestrator:
                 self._run_current_stage(context)
         except BudgetExceeded as error:
             self._budget_exhausted(context, str(error))
+        except ModelProviderError as error:
+            self._fail(context, "SYSTEM_ERROR", str(error))
         except Exception as error:
             self._fail(context, "ORCHESTRATION_ERROR", str(error))
         return context
@@ -153,8 +165,17 @@ class Orchestrator:
     def _evaluate(self, context: RTLTaskContext) -> None:
         outcome = self.evaluator.evaluate(context)
         if not outcome.accepted or outcome.selected_candidate_id is None:
-            self._record(context, EventType.EVAL_REJECTED, {"reason": outcome.reason})
-            self._fail(context, "EVALUATION_REJECTED", outcome.reason)
+            self._record(
+                context,
+                EventType.EVAL_REJECTED,
+                {"reason": outcome.reason, "category": outcome.category},
+            )
+            if outcome.selected_candidate_id is not None and outcome.category is not None:
+                context.selected_candidate_id = outcome.selected_candidate_id
+                context.failure_category = outcome.category
+                self._transition(context, TaskStage.CLASSIFYING)
+            else:
+                self._fail(context, "EVALUATION_REJECTED", outcome.reason)
             return
 
         context.selected_candidate_id = outcome.selected_candidate_id
@@ -212,12 +233,19 @@ class Orchestrator:
         self._transition(context, TaskStage.CLASSIFYING)
 
     def _classify(self, context: RTLTaskContext) -> None:
-        if context.failure_category == "SYSTEM_ERROR":
+        feedback = self._selected_debugger_feedback(context)
+        decision = self.router.route(context.failure_category, feedback)
+        context.metadata["reflection_decision"] = decision.to_dict()
+        self._record(context, EventType.REFLECTION_ROUTED, decision.to_dict())
+        if decision.action is ReflectionAction.RECOVER_INFRASTRUCTURE:
             self._fail(
                 context,
-                "SYSTEM_ERROR",
-                "verification infrastructure failed; Debugger was not invoked",
+                context.failure_category or "SYSTEM_ERROR",
+                f"{decision.reason} Debugger was not invoked.",
             )
+            return
+        if decision.action is ReflectionAction.WAIT_FOR_USER:
+            self._transition(context, TaskStage.WAITING_FOR_USER)
             return
         if context.budget.can_repair:
             self._transition(context, TaskStage.REPAIRING)
@@ -232,6 +260,20 @@ class Orchestrator:
                 {"candidate_id": candidate.candidate_id, "restored_id": candidate.parent_id},
             )
         self._budget_exhausted(context, "repair budget exhausted")
+
+    @staticmethod
+    def _selected_debugger_feedback(context: RTLTaskContext) -> dict:
+        attempts = context.metadata.get("verification_attempts", [])
+        if not isinstance(attempts, list):
+            return {}
+        for attempt in attempts:
+            if (
+                isinstance(attempt, dict)
+                and attempt.get("candidate_id") == context.selected_candidate_id
+                and isinstance(attempt.get("debugger_feedback"), dict)
+            ):
+                return dict(attempt["debugger_feedback"])
+        return {}
 
     def _repair(self, context: RTLTaskContext) -> None:
         context.budget.record_repair()

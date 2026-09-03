@@ -35,3 +35,14 @@ def test_failure_marker_does_not_match_successful_assertion_text() -> None:
     assert not tool_wrapper.contains_failure_marker("all assertions passed")
     assert not tool_wrapper.contains_failure_marker("FAILED=0")
     assert not tool_wrapper.contains_failure_marker("0 failures")
+
+
+def test_failure_marker_detects_human_v2_nonzero_mismatch_count() -> None:
+    output = (
+        "Hint: Output 'q' has 386 mismatches. First mismatch occurred at time 30.\n"
+        "Hint: Total mismatched samples is 386 out of 439 samples\n"
+        "Mismatches: 386 in 439 samples\n"
+    )
+
+    assert tool_wrapper.contains_failure_marker(output)
+    assert not tool_wrapper.contains_failure_marker("Mismatches: 0 in 439 samples")

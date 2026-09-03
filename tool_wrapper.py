@@ -38,6 +38,10 @@ ZERO_FAILURE_COUNT_RE = re.compile(
     r"(?:\bFAIL(?:ED|URES?)?\s*[:=]\s*0\b|\b0\s+FAILURES?\b)",
     re.IGNORECASE,
 )
+MISMATCH_COUNT_RE = re.compile(
+    r"(?:\bMismatches?\s*:\s*|\bhas\s+|\bTotal mismatched samples is\s+)(\d+)",
+    re.IGNORECASE,
+)
 YOSYS_METRICS = {
     "wire_count": re.compile(r"Number of wires:\s+(\d+)"),
     "wire_bits": re.compile(r"Number of wire bits:\s+(\d+)"),
@@ -51,6 +55,8 @@ DEFAULT_SCORE_CONFIG = {
     "default_error_penalty": 25,
     "penalties": {},
 }
+
+VERILATOR_UNSUPPORTED_CODES = {"BLKLOOPINIT"}
 
 
 def parse_iverilog(stderr: str) -> list[dict[str, Any]]:
@@ -180,6 +186,8 @@ def _output_text(value: str | bytes | None) -> str:
 
 
 def contains_failure_marker(output: str) -> bool:
+    if any(int(match.group(1)) > 0 for match in MISMATCH_COUNT_RE.finditer(output)):
+        return True
     normalized = ZERO_FAILURE_COUNT_RE.sub("", output)
     return FAILURE_TEXT_RE.search(normalized) is not None
 
@@ -269,13 +277,27 @@ def _classify_command_failure(
     if result["system_error"]:
         return _result(stage, "FAIL", "SYSTEM_ERROR", result, tool=tool)
     if result["returncode"] != 0:
+        errors = parse_error(tool, result["stderr"])
+        if tool == "verilator" and errors and all(
+            item.get("type") in VERILATOR_UNSUPPORTED_CODES
+            or "unsupported" in str(item.get("message", "")).lower()
+            for item in errors
+        ):
+            return _result(
+                stage,
+                "FAIL",
+                "TOOL_INCOMPATIBILITY",
+                result,
+                tool=tool,
+                errors=errors,
+            )
         return _result(
             stage,
             "FAIL",
             default_category,
             result,
             tool=tool,
-            errors=parse_error(tool, result["stderr"]),
+            errors=errors,
         )
     return _result(stage, "PASS", "OK", result, tool=tool)
 
@@ -399,10 +421,20 @@ def eval_quality(files: list[str]) -> dict[str, Any]:
         "deductions": deductions,
     }
     if result["returncode"] != 0 or error_count:
+        category = (
+            "TOOL_INCOMPATIBILITY"
+            if diagnostics
+            and all(
+                item.get("type") in VERILATOR_UNSUPPORTED_CODES
+                or "unsupported" in str(item.get("message", "")).lower()
+                for item in diagnostics
+            )
+            else "QUALITY_ERROR"
+        )
         return _result(
             "QUALITY",
             "FAIL",
-            "QUALITY_ERROR",
+            category,
             result,
             tool="verilator",
             errors=diagnostics,

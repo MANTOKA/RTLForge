@@ -16,7 +16,11 @@ def _tool_result(action: str, *, status: str = "PASS", score: int = 100) -> dict
         "action": action,
         "stage": action.upper(),
         "status": status,
-        "category": "OK" if status == "PASS" else "LINT_ERROR",
+        "category": (
+            "OK"
+            if status == "PASS"
+            else ("SYNTAX_ERROR" if action == "compile" else "LINT_ERROR")
+        ),
         "tool": "verilator" if action != "compile" else "iverilog",
         "returncode": 0 if status == "PASS" else 1,
         "duration_ms": 7,
@@ -49,6 +53,24 @@ class RecordingRunner:
         self.calls.append((candidate_id, action))
         status = "FAIL" if (candidate_id, action) in self.failures else "PASS"
         return _tool_result(action, status=status, score=self.scores[candidate_id])
+
+
+class ToolIncompatibilityRunner(RecordingRunner):
+    def run(self, action: str, candidate_path: Path) -> dict:
+        result = super().run(action, candidate_path)
+        if action in {"lint", "eval_quality"}:
+            result["status"] = "FAIL"
+            result["category"] = "TOOL_INCOMPATIBILITY"
+            result["returncode"] = 1
+            result["errors"] = [
+                {
+                    "tool": "verilator",
+                    "severity": "ERROR",
+                    "type": "BLKLOOPINIT",
+                    "message": "Unsupported delayed assignment in reset loop",
+                }
+            ]
+        return result
 
 
 def _context_with_candidates(tmp_path: Path) -> tuple[RTLTaskContext, Path]:
@@ -122,7 +144,8 @@ def test_static_evaluator_rejects_when_all_candidates_fail(tmp_path: Path) -> No
     outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
 
     assert outcome.accepted is False
-    assert outcome.selected_candidate_id is None
+    assert outcome.selected_candidate_id == "cand_01"
+    assert outcome.category == "SYNTAX_ERROR"
     assert outcome.scores == {"cand_01": 0.0, "cand_02": 0.0}
 
 
@@ -169,6 +192,21 @@ def test_below_threshold_candidates_remain_as_verification_fallbacks(tmp_path: P
         candidate.metadata["static_evaluation"]["eligible_for_verification"]
         for candidate in context.candidates
     )
+
+
+def test_verilator_incompatibility_does_not_reject_iverilog_compilable_rtl(
+    tmp_path: Path,
+) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    runner = ToolIncompatibilityRunner({"cand_01": 100, "cand_02": 90})
+
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+
+    assert outcome.accepted is True
+    assert outcome.selected_candidate_id == "cand_01"
+    report = context.candidates[0].metadata["static_evaluation"]
+    assert report["eligible_for_verification"] is True
+    assert "tool incompatibility" in report["reason"].lower()
 
 
 def test_docker_runner_rejects_artifacts_outside_runs_root(tmp_path: Path) -> None:
