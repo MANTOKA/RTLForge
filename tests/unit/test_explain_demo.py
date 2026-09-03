@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from verilog_agent.benchmarks.explain_demo import (
+    _find_recorded_defect,
     _find_recorded_repair,
     _find_summary,
     _mismatch_count,
@@ -67,3 +68,32 @@ def test_find_recorded_repair_matches_source_summary(tmp_path: Path) -> None:
 
     assert result is not None
     assert result["report_path"].endswith("repair_replay.json")
+
+
+def test_find_recorded_defect_requires_successful_reverification(tmp_path: Path) -> None:
+    failed = tmp_path / "repair_replay_failed" / "repair_replay.json"
+    passed = tmp_path / "repair_replay_passed" / "repair_replay.json"
+    failed.parent.mkdir()
+    passed.parent.mkdir()
+    failed.write_text(
+        json.dumps(
+            {
+                "mode": "defect_injection_repair_replay",
+                "repaired_verification_passed": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    passed.write_text(
+        json.dumps(
+            {
+                "mode": "defect_injection_repair_replay",
+                "repaired_verification_passed": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _find_recorded_defect(tmp_path)["report_path"].endswith(
+        "repair_replay_passed/repair_replay.json"
+    )

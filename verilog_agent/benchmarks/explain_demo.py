@@ -106,6 +106,57 @@ def _print_recorded_repair(repair: dict[str, Any] | None) -> None:
     print(f"Recorded Re-Verification -> {status}; mismatches={mismatches}/{samples}")
 
 
+def _find_recorded_defect(runs_root: Path) -> dict[str, Any]:
+    matches: list[tuple[float, dict[str, Any]]] = []
+    for path in runs_root.glob("repair_replay_*/repair_replay.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if (
+            payload.get("mode") == "defect_injection_repair_replay"
+            and payload.get("repaired_verification_passed") is True
+        ):
+            payload["report_path"] = path.as_posix()
+            matches.append((path.stat().st_mtime, payload))
+    if not matches:
+        raise FileNotFoundError("No successful recorded defect-injection repair was found")
+    return max(matches, key=lambda item: item[0])[1]
+
+
+def _show_defect_injection(
+    *, case: VerilogEvalCase, runner: DockerEDARunner, runs_root: Path
+) -> tuple[dict[str, Any], Path, Path]:
+    repair = _find_recorded_defect(runs_root)
+    report_path = Path(repair["report_path"])
+    run_root = report_path.parent
+    faulty = run_root / "candidates" / repair["initial"]["candidate_id"] / "TopModule.v"
+    repaired = Path(repair["repair"]["artifact_path"])
+    initial = runner.run_files("simulate", [case.testbench_path, case.reference_path, faulty])
+    final = runner.run_files("simulate", [case.testbench_path, case.reference_path, repaired])
+    decision = repair["reflection"]
+    mismatch = _mismatch_count(initial)
+    repaired_mismatch = _mismatch_count(final)
+
+    _heading("故障注入场景：Prob035_count1to10")
+    print("注入规则 -> 将正确候选中的 q + 4'd1 人为改为 q - 4'd1")
+    print(
+        f"Injected Verification -> {initial['status']}; "
+        f"category={_normalized_category(initial)}; mismatches={mismatch}"
+    )
+    print(
+        f"Router -> {decision['policy']}; action={decision['action']}; Debugger=YES"
+    )
+    print(f"Recorded Debugger -> {repair['repair']['candidate_id']}")
+    print(f"Debugger rationale -> {repair['repair']['metadata'].get('rationale')}")
+    print(f"diff -> {repair['repair']['metadata'].get('diff_path')}")
+    print(
+        f"Re-Verification -> {final['status']}; mismatches={repaired_mismatch}; "
+        "故障注入案例不计入 Human v2 自然基线"
+    )
+    return repair, faulty, repaired
+
+
 def _normalized_category(result: dict[str, Any]) -> str:
     category = str(result.get("category", "UNKNOWN"))
     if category in {"ASSERTION_FAILURE", "SIMULATION_ERROR"}:
@@ -208,6 +259,12 @@ def main() -> int:
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--docker-image", default="verilog-agent-sandbox:reflection")
     parser.add_argument(
+        "--scenario",
+        choices=("correct", "icarus", "natural", "defect", "all"),
+        default="all",
+        help="Run one classroom demo category or the complete set",
+    )
+    parser.add_argument(
         "--with-debugger",
         action="store_true",
         help="Call the real Debugger once for each natural failure (uses API tokens)",
@@ -215,6 +272,7 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     args = parser.parse_args()
     load_dotenv(args.env_file, override=False)
+    args.dataset_root = args.dataset_root or os.environ.get("VERILOG_EVAL_HUMAN_V2_ROOT")
     if not args.dataset_root:
         parser.error("--dataset-root or VERILOG_EVAL_HUMAN_V2_ROOT is required")
 
@@ -237,50 +295,65 @@ def main() -> int:
         "normal": None,
         "tool_incompatibilities": [],
         "natural_failures": [],
+        "defect_injection": None,
         "debugger_repairs": [],
     }
     normal_summary_path = _find_summary(args.runs_root, NORMAL_CASE)
-    _, report["normal"] = _show_agent_case(
-        problem_id=NORMAL_CASE,
-        case=by_id[NORMAL_CASE],
-        summary_path=normal_summary_path,
-        runner=runner,
-        expect_failure=False,
-    )
-
-    for problem_id in TOOL_INCOMPATIBLE_CASES:
-        report["tool_incompatibilities"].append(
-            _show_tool_incompatibility(
-                case=by_id[problem_id], runner=runner, runs_root=args.runs_root
-            )
-        )
-
-    natural_inputs = []
-    for problem_id in NATURAL_FAILURE_CASES:
-        summary_path = _find_summary(args.runs_root, problem_id)
-        summary, result = _show_agent_case(
-            problem_id=problem_id,
-            case=by_id[problem_id],
-            summary_path=summary_path,
+    debugger_inputs: list[tuple[str, Path, Path, str]] = []
+    if args.scenario in {"correct", "all"}:
+        _, report["normal"] = _show_agent_case(
+            problem_id=NORMAL_CASE,
+            case=by_id[NORMAL_CASE],
+            summary_path=normal_summary_path,
             runner=runner,
-            expect_failure=True,
+            expect_failure=False,
         )
-        report["natural_failures"].append(result)
-        candidate_path = Path(summary["candidates"][0]["artifact_path"])
-        natural_inputs.append((problem_id, summary_path, candidate_path))
-        recorded = _find_recorded_repair(
-            args.runs_root,
-            summary_path,
-            initial_mismatches=result["candidates"][0]["mismatches"],
-        )
-        _print_recorded_repair(recorded)
 
-    if args.with_debugger:
+    if args.scenario in {"icarus", "all"}:
+        for problem_id in TOOL_INCOMPATIBLE_CASES:
+            report["tool_incompatibilities"].append(
+                _show_tool_incompatibility(
+                    case=by_id[problem_id], runner=runner, runs_root=args.runs_root
+                )
+            )
+
+    if args.scenario in {"natural", "all"}:
+        for problem_id in NATURAL_FAILURE_CASES:
+            summary_path = _find_summary(args.runs_root, problem_id)
+            summary, result = _show_agent_case(
+                problem_id=problem_id,
+                case=by_id[problem_id],
+                summary_path=summary_path,
+                runner=runner,
+                expect_failure=True,
+            )
+            report["natural_failures"].append(result)
+            candidate_path = Path(summary["candidates"][0]["artifact_path"])
+            debugger_inputs.append(
+                (problem_id, summary_path, candidate_path, "natural_failure")
+            )
+            recorded = _find_recorded_repair(
+                args.runs_root,
+                summary_path,
+                initial_mismatches=result["candidates"][0]["mismatches"],
+            )
+            _print_recorded_repair(recorded)
+
+    if args.scenario in {"defect", "all"}:
+        defect, faulty, _ = _show_defect_injection(
+            case=by_id[NORMAL_CASE], runner=runner, runs_root=args.runs_root
+        )
+        report["defect_injection"] = defect
+        debugger_inputs.append(
+            (NORMAL_CASE, normal_summary_path, faulty, "defect_injection")
+        )
+
+    if args.with_debugger and debugger_inputs:
         try:
             provider = OpenAIResponsesProvider(ProviderSettings.from_env())
         except ProviderConfigurationError as error:
             parser.error(str(error))
-        for problem_id, summary_path, candidate_path in natural_inputs:
+        for problem_id, summary_path, candidate_path, failure_source in debugger_inputs:
             _heading(f"真实 Debugger：{problem_id}")
             try:
                 repair = run_repair_replay(
@@ -291,7 +364,7 @@ def main() -> int:
                     provider=provider,
                     runs_root=args.runs_root,
                     docker_image=args.docker_image,
-                    failure_source="natural_failure",
+                    failure_source=failure_source,
                 )
             except (ModelProviderError, RuntimeError, OSError) as error:
                 repair = {"problem_id": problem_id, "status": "INTERRUPTED", "reason": str(error)}
@@ -311,9 +384,9 @@ def main() -> int:
                         f"{mismatch.get('total_samples')}"
                     )
             report["debugger_repairs"].append(repair)
-    else:
-        _heading("Debugger 未调用")
-        print("添加 --with-debugger 才会产生模型调用和修复候选。")
+    elif debugger_inputs:
+        _heading("本次未重新调用 Debugger")
+        print("上面显示的是已保存的真实 Debugger 证据；添加 --with-debugger 可重新调用。")
 
     output = args.runs_root / "demos" / "human_v2_explain_demo.json"
     output.parent.mkdir(parents=True, exist_ok=True)

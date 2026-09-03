@@ -31,20 +31,35 @@ available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SH
 The first Human v2 development baseline and repair evidence are recorded in
 [`docs/HUMAN_V2_DEV_BASELINE_ZH.md`](docs/HUMAN_V2_DEV_BASELINE_ZH.md).
 
-To replay an explainable five-case Human v2 demonstration in the terminal (one
-normal pass, two official-reference Icarus incompatibilities, and two natural
-Agent failures), run:
+Run the classroom demonstrations separately in PowerShell:
 
 ```powershell
+# Correct Agent result: Planner -> Generator -> Docker Verification PASS
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --docker-image verilog-agent-sandbox:reflection
+  --scenario correct
+
+# Two official-reference Icarus incompatibilities -> infrastructure route
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --scenario icarus
+
+# Two natural Agent failures -> Router -> recorded Debugger outcomes
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --scenario natural
+
+# Injected decrement defect -> Router -> Debugger -> repaired PASS
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --scenario defect
 ```
 
-The default command makes no LLM request: it re-runs deterministic Docker
-verification and displays recorded Debugger evidence. Add `--with-debugger` to
-call the configured real Debugger again; this consumes API tokens and may
-produce a different repair candidate.
+These commands make no LLM request: they re-run deterministic Docker verification
+and display recorded real-Debugger evidence. Add `--with-debugger` to a `natural`
+or `defect` command to call the configured real Debugger again; this consumes API
+tokens and may produce a different repair candidate. Use `--scenario all` for the
+combined demonstration.
 
 ## Intended product
 
