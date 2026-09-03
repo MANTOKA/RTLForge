@@ -31,6 +31,21 @@ available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SH
 The first Human v2 development baseline and repair evidence are recorded in
 [`docs/HUMAN_V2_DEV_BASELINE_ZH.md`](docs/HUMAN_V2_DEV_BASELINE_ZH.md).
 
+To replay an explainable five-case Human v2 demonstration in the terminal (one
+normal pass, two official-reference Icarus incompatibilities, and two natural
+Agent failures), run:
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --docker-image verilog-agent-sandbox:reflection
+```
+
+The default command makes no LLM request: it re-runs deterministic Docker
+verification and displays recorded Debugger evidence. Add `--with-debugger` to
+call the configured real Debugger again; this consumes API tokens and may
+produce a different repair candidate.
+
 ## Intended product
 
 The target deliverable is a local application that a user can start with Docker Compose and open in a browser. The browser will provide a chat-style interface for entering an RTL requirement, viewing generated Verilog, running EDA checks, reviewing diagnostics, and downloading the final artifacts.

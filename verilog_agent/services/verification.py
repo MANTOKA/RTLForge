@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -21,6 +22,16 @@ _CATEGORY_MAP = {
     "INPUT_NOT_FOUND": "SYSTEM_ERROR",
     "UNSUPPORTED_INPUT": "SYSTEM_ERROR",
 }
+
+_OUTPUT_MISMATCH_RE = re.compile(
+    r"^Hint: Output '([A-Za-z_][A-Za-z0-9_$]*)' has (\d+) mismatches\. "
+    r"First mismatch occurred at time (\d+)\.$",
+    re.MULTILINE,
+)
+_TOTAL_MISMATCH_RE = re.compile(
+    r"^Hint: Total mismatched samples is (\d+) out of (\d+) samples$",
+    re.MULTILINE,
+)
 
 
 @dataclass(slots=True)
@@ -224,9 +235,26 @@ def _debugger_feedback(result: dict[str, Any], category: str) -> dict[str, Any]:
                 "message": str(error.get("message", ""))[:500],
             }
         )
-    return {
+    feedback = {
         "category": category,
         "tool": result.get("tool"),
         "errors": errors,
         "timed_out": result.get("category") == "TIMEOUT",
     }
+    stdout = str(result.get("stdout", ""))
+    output_mismatches = [
+        {
+            "output": match.group(1),
+            "mismatches": int(match.group(2)),
+            "first_mismatch_time": int(match.group(3)),
+        }
+        for match in _OUTPUT_MISMATCH_RE.finditer(stdout)
+    ][:10]
+    total = _TOTAL_MISMATCH_RE.search(stdout)
+    if output_mismatches or total:
+        feedback["mismatch_summary"] = {
+            "outputs": output_mismatches,
+            "total_mismatched_samples": int(total.group(1)) if total else None,
+            "total_samples": int(total.group(2)) if total else None,
+        }
+    return feedback

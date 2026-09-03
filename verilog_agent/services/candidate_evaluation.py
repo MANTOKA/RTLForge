@@ -148,6 +148,23 @@ class DockerEDARunner:
         discovered = shutil.which("docker")
         if discovered:
             return discovered
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            desktop_cli = (
+                Path(local_app_data)
+                / "Programs"
+                / "DockerDesktop"
+                / "resources"
+                / "bin"
+                / "docker.exe"
+            )
+            try:
+                if desktop_cli.is_file():
+                    return str(desktop_cli)
+            except PermissionError:
+                # A restricted parent process may be allowed to execute Docker while
+                # being unable to stat the Docker Desktop installation directory.
+                return str(desktop_cli)
         raise DockerToolError("Docker CLI was not found; set DOCKER_BIN to docker.exe")
 
 
