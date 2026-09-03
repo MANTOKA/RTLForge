@@ -1,0 +1,24 @@
+{
+  "config_version": "score-v1",
+  "initial_score": 100,
+  "threshold": 75,
+  "default_warning_penalty": 2,
+  "default_error_penalty": 25,
+  "penalties": {
+    "LATCH": 30,
+    "SYNCASYNCNET": 20,
+    "CASEINCOMPLETE": 15,
+    "CASEOVERLAP": 10,
+    "UNDRIVEN": 15,
+    "MULTIDRIVEN": 25,
+    "COMBDLY": 10,
+    "BLKSEQ": 10,
+    "UNUSED": 5,
+    "UNUSEDPARAM": 5,
+    "UNUSEDSIGNAL": 5,
+    "WIDTH": 10,
+    "WIDTHEXPAND": 10,
+    "WIDTHTRUNC": 10,
+    "UNOPTFLAT": 20
+  }
+}

@@ -39,6 +39,9 @@ def _run(command: list[str], *, timeout: int = 300) -> subprocess.CompletedProce
 
 @pytest.fixture(scope="session")
 def docker_image() -> str:
+    existing_image = os.environ.get("VERILOG_AGENT_TEST_IMAGE")
+    if existing_image:
+        return existing_image
     docker = _docker_binary()
     result = _run([docker, "build", "-t", IMAGE, str(REPO_ROOT)], timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -219,8 +222,11 @@ def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> 
     assert result["status"] == "PASS"
     assert result["metrics"] == {
         "score": 100,
+        "threshold": 75,
+        "config_version": "score-v1",
         "error_count": 0,
         "warning_count": 0,
+        "deductions": [],
     }
 
 

@@ -43,6 +43,14 @@ YOSYS_METRICS = {
     "wire_bits": re.compile(r"Number of wire bits:\s+(\d+)"),
     "cell_count": re.compile(r"Number of cells:\s+(\d+)"),
 }
+DEFAULT_SCORE_CONFIG = {
+    "config_version": "score-v1-fallback",
+    "initial_score": 100,
+    "threshold": 75,
+    "default_warning_penalty": 2,
+    "default_error_penalty": 25,
+    "penalties": {},
+}
 
 
 def parse_iverilog(stderr: str) -> list[dict[str, Any]]:
@@ -93,6 +101,65 @@ def parse_error(tool: str, stderr: str) -> list[dict[str, Any]]:
     if tool == "verilator":
         return parse_verilator(stderr)
     return []
+
+
+def load_score_config() -> dict[str, Any]:
+    """Load a versioned quality configuration without adding runtime dependencies."""
+    configured = os.environ.get("VERILOG_AGENT_SCORE_CONFIG")
+    candidates = [Path(configured)] if configured else []
+    candidates.extend(
+        [
+            Path(__file__).with_name("static_score_v1.json"),
+            Path(__file__).parent / "config" / "static_score_v1.json",
+        ]
+    )
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("penalties"), dict):
+            return payload
+    return dict(DEFAULT_SCORE_CONFIG)
+
+
+def score_diagnostics(
+    diagnostics: list[dict[str, Any]], config: dict[str, Any]
+) -> tuple[int, list[dict[str, Any]]]:
+    """Produce an explainable, deterministic deduction list from Verilator diagnostics."""
+    configured_penalties = {
+        str(key).upper(): int(value) for key, value in config.get("penalties", {}).items()
+    }
+    deductions = []
+    total_penalty = 0
+    for diagnostic in diagnostics:
+        rule = str(diagnostic.get("type", "UNKNOWN")).upper()
+        penalty = configured_penalties.get(rule)
+        if penalty is None:
+            matching_prefixes = [key for key in configured_penalties if rule.startswith(key)]
+            if matching_prefixes:
+                penalty = configured_penalties[max(matching_prefixes, key=len)]
+        if penalty is None:
+            severity_key = (
+                "default_error_penalty"
+                if diagnostic.get("severity") == "ERROR"
+                else "default_warning_penalty"
+            )
+            penalty = int(config.get(severity_key, 0))
+        total_penalty += penalty
+        deductions.append(
+            {
+                "rule": rule,
+                "penalty": penalty,
+                "evidence": {
+                    "file": diagnostic.get("file"),
+                    "line": diagnostic.get("line"),
+                    "message": diagnostic.get("message", ""),
+                },
+            }
+        )
+    initial_score = int(config.get("initial_score", 100))
+    return max(0, initial_score - total_penalty), deductions
 
 
 def _timeout(name: str, default: int) -> int:
@@ -262,7 +329,7 @@ def compile_verilog(files: list[str]) -> dict[str, Any]:
 
 def lint_verilog(files: list[str]) -> dict[str, Any]:
     result = run_command(
-        ["verilator", "--lint-only", "-Wall", *files],
+        ["verilator", "--lint-only", "-Wall", "--Wno-fatal", *files],
         timeout_seconds=_timeout("lint", 30),
     )
     return _classify_command_failure("LINT", result, "verilator", "LINT_ERROR")
@@ -319,13 +386,17 @@ def eval_quality(files: list[str]) -> dict[str, Any]:
         return _classify_command_failure("QUALITY", result, "verilator", "QUALITY_ERROR")
 
     diagnostics = parse_verilator(result["stderr"])
+    config = load_score_config()
     error_count = sum(item["severity"] == "ERROR" for item in diagnostics)
     warning_count = sum(item["severity"] == "WARNING" for item in diagnostics)
-    score = max(0, 100 - error_count * 25 - warning_count * 5)
+    score, deductions = score_diagnostics(diagnostics, config)
     metrics = {
         "score": score,
+        "threshold": int(config.get("threshold", 75)),
+        "config_version": str(config.get("config_version", "unknown")),
         "error_count": error_count,
         "warning_count": warning_count,
+        "deductions": deductions,
     }
     if result["returncode"] != 0 or error_count:
         return _result(

@@ -20,9 +20,11 @@ RUN groupadd --gid 10001 eda \
     && chown -R eda:eda /work /opt/verilog-agent
 
 COPY --chown=eda:eda tool_wrapper.py /opt/verilog-agent/tool_wrapper.py
+COPY --chown=eda:eda config/static_score_v1.json /opt/verilog-agent/static_score_v1.json
 
 ENV TMPDIR=/work \
-    VERILOG_AGENT_INPUT_ROOT=/inputs
+    VERILOG_AGENT_INPUT_ROOT=/inputs \
+    VERILOG_AGENT_SCORE_CONFIG=/opt/verilog-agent/static_score_v1.json
 
 WORKDIR /work
 USER 10001:10001

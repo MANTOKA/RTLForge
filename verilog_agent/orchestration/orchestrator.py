@@ -171,6 +171,10 @@ class Orchestrator:
     def _verify(self, context: RTLTaskContext) -> None:
         candidate = context.candidate()
         outcome = self.verifier.verify(context, candidate)
+        selected_candidate_id = outcome.details.get("selected_candidate_id")
+        if selected_candidate_id is not None:
+            context.selected_candidate_id = selected_candidate_id
+            candidate = context.candidate(selected_candidate_id)
         if outcome.passed:
             context.failure_category = None
             self._record(
@@ -208,6 +212,13 @@ class Orchestrator:
         self._transition(context, TaskStage.CLASSIFYING)
 
     def _classify(self, context: RTLTaskContext) -> None:
+        if context.failure_category == "SYSTEM_ERROR":
+            self._fail(
+                context,
+                "SYSTEM_ERROR",
+                "verification infrastructure failed; Debugger was not invoked",
+            )
+            return
         if context.budget.can_repair:
             self._transition(context, TaskStage.REPAIRING)
             return
