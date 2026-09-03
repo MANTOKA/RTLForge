@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
-from verilog_agent.services import DockerEDARunner, DockerToolError, StaticCandidateEvaluator
+from verilog_agent.services import (
+    DockerEDARunner,
+    DockerToolError,
+    StaticCandidateEvaluator,
+    candidate_evaluation,
+)
 
 
 def _tool_result(action: str, *, status: str = "PASS", score: int = 100) -> dict:
@@ -228,3 +233,23 @@ def test_docker_runner_rejects_unapproved_oracle_path(tmp_path: Path) -> None:
 
     with pytest.raises(DockerToolError, match="read-only roots"):
         runner.run_files("simulate", [unapproved])
+
+
+def test_docker_runner_discovers_standard_docker_desktop_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = (
+        tmp_path
+        / "Programs"
+        / "DockerDesktop"
+        / "resources"
+        / "bin"
+        / "docker.exe"
+    )
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    monkeypatch.delenv("DOCKER_BIN", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(candidate_evaluation.shutil, "which", lambda _: None)
+
+    assert DockerEDARunner(tmp_path / "runs")._docker_binary() == str(cli)

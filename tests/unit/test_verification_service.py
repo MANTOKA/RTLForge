@@ -117,6 +117,37 @@ def test_verification_returns_best_ranked_failure_for_debugger(tmp_path: Path) -
     assert outcome.details["debugger_feedback"]["category"] == "FUNCTIONAL_MISMATCH"
 
 
+def test_debugger_feedback_includes_sanitized_mismatch_summary(tmp_path: Path) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'done' has 12 mismatches. "
+        "First mismatch occurred at time 210.\n"
+        "Hint: Total mismatched samples is 12 out of 100 samples\n"
+        "private oracle transcript that must not be copied\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    feedback = outcome.details["debugger_feedback"]
+    assert feedback["mismatch_summary"] == {
+        "outputs": [
+            {"output": "done", "mismatches": 12, "first_mismatch_time": 210}
+        ],
+        "total_mismatched_samples": 12,
+        "total_samples": 100,
+    }
+    assert "private oracle transcript" not in json.dumps(feedback)
+
+
 def test_verification_stops_on_infrastructure_failure(tmp_path: Path) -> None:
     context, runs_root, testbench = _context(tmp_path)
     service = GoldenTestbenchVerificationService(
