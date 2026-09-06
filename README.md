@@ -30,6 +30,9 @@ the first real Debugger repair path are implemented; the browser UI is a later s
 available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
 The first Human v2 development baseline and repair evidence are recorded in
 [`docs/HUMAN_V2_DEV_BASELINE_ZH.md`](docs/HUMAN_V2_DEV_BASELINE_ZH.md).
+The live single-case workflow, resumable 156-case evaluation, and model-comparison
+commands are documented in
+[`docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md`](docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md).
 
 Run the classroom demonstrations separately in PowerShell:
 

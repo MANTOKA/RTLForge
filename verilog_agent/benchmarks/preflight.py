@@ -53,6 +53,7 @@ def preflight_references(
                 "testbench_sha256": sha256(case.testbench_path.read_bytes()).hexdigest(),
                 "reference_sha256": sha256(case.reference_path.read_bytes()).hexdigest(),
                 "diagnostics": tool_result.get("errors", []),
+                "reason": tool_result.get("error"),
             }
         )
 

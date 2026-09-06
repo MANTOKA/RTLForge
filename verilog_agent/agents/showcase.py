@@ -91,6 +91,8 @@ class PlannerGeneratorShowcase:
         self.emit(f"Task ID: {context.task_id}")
         if self.evaluator is None:
             self.emit("verified_rtl: false（此演示有意停在候选生成后）")
+        elif self.verifier is not None:
+            self.emit("verified_rtl: false（初始状态；本次将继续执行静态门禁与功能仿真）")
         else:
             self.emit("verified_rtl: false（本次只完成静态 EDA 门禁，尚未功能仿真）")
         self._heading("阶段 0：用户自然语言需求")
@@ -134,16 +136,22 @@ class PlannerGeneratorShowcase:
             started = perf_counter()
             orchestrator.advance_task(context.task_id)
             evaluator_ms = round((perf_counter() - started) * 1000)
-            self._expect_stage(context, TaskStage.VERIFYING, store, "Candidate Evaluation")
+            if context.current_stage not in {TaskStage.VERIFYING, TaskStage.CLASSIFYING}:
+                self._expect_stage(context, TaskStage.VERIFYING, store, "Candidate Evaluation")
             selected = context.candidate()
             static_evaluation = dict(selected.metadata.get("static_evaluation", {}))
             self._render_static_evaluation(context)
             self.emit(f"selected_candidate: {selected.candidate_id}")
             self.emit(f"selected_artifact: {selected.artifact_path}")
             self.emit(f"Candidate Evaluation elapsed: {evaluator_ms} ms")
-            self.emit("静态门禁已通过；未执行 testbench 仿真，因此 verified_rtl 仍为 false。")
+            if context.current_stage is TaskStage.VERIFYING:
+                self.emit("静态门禁已通过；尚未执行 testbench 仿真。")
+            else:
+                self.emit(
+                    f"静态门禁失败；类别为 {context.failure_category}，进入 Reflection Router。"
+                )
 
-        if self.verifier is not None:
+        if self.verifier is not None and context.current_stage is TaskStage.VERIFYING:
             self._heading("阶段 4：Verification 正在执行 golden testbench 仿真")
             started = perf_counter()
             orchestrator.advance_task(context.task_id)
@@ -189,6 +197,7 @@ class PlannerGeneratorShowcase:
             report_path = context.metadata.get("verification_report")
             if report_path:
                 verification = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                self._render_verification(verification)
 
         events = store.list_events(context.task_id)
         self._heading("阶段 6：Orchestrator 事件轨迹")
@@ -307,9 +316,17 @@ class PlannerGeneratorShowcase:
         self.emit(f"verification_category: {report.get('category', 'UNKNOWN')}")
         self.emit(f"confidence: {report.get('testbench', {}).get('confidence', 'UNKNOWN')}")
         for attempt in report.get("attempts", []):
+            mismatch = attempt.get("debugger_feedback", {}).get("mismatch_summary", {})
+            mismatch_text = ""
+            if mismatch.get("total_mismatched_samples") is not None:
+                mismatch_text = (
+                    f", mismatches={mismatch['total_mismatched_samples']}/"
+                    f"{mismatch.get('total_samples')}"
+                )
             self.emit(
                 f"  {attempt.get('candidate_id')}: {attempt.get('status')} "
-                f"[{attempt.get('category')}, {attempt.get('duration_ms', 0)} ms]"
+                f"[{attempt.get('category')}, {attempt.get('duration_ms', 0)} ms"
+                f"{mismatch_text}]"
             )
 
     def _expect_stage(

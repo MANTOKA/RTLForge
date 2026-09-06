@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from verilog_agent.agents.debugger import RealDebugger
 from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
+from verilog_agent.benchmarks.preflight import preflight_references
 from verilog_agent.benchmarks.verilogeval import load_human_v2
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
@@ -48,6 +50,10 @@ def main() -> None:
     parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
+    parser.add_argument(
+        "--model",
+        help="Override VERILOG_AGENT_MODEL for this run; applies to all three LLM roles",
+    )
     parser.add_argument(
         "--max-repairs",
         type=int,
@@ -115,8 +121,8 @@ def main() -> None:
         parser.error("--max-repairs requires a golden --testbench or Human v2 case")
 
     if args.offline_example:
-        if args.env_file is not None or args.check_config:
-            parser.error("--env-file and --check-config are only available in live mode")
+        if args.env_file is not None or args.check_config or args.model:
+            parser.error("--env-file, --check-config, and --model require live mode")
         if args.spec is not None:
             parser.error("--offline-example uses its built-in counter requirement; omit spec")
         if args.candidates != 2:
@@ -128,6 +134,8 @@ def main() -> None:
         loaded_env_file = _load_provider_environment(parser, args.env_file)
         try:
             settings = ProviderSettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
             provider = OpenAIResponsesProvider(settings)
         except ProviderConfigurationError as error:
             parser.error(str(error))
@@ -191,14 +199,43 @@ def main() -> None:
             else None
         ),
     )
+    reference_baseline = None
+    if benchmark_case is not None and runner is not None:
+        print("\n" + "=" * 72)
+        print("Human v2 输入与官方参考基线")
+        print("=" * 72)
+        print(f"prompt_file: {benchmark_case.prompt_path}")
+        print(f"golden_testbench: {benchmark_case.testbench_path}")
+        print("Agent visibility: prompt only; testbench/ref contents are hidden")
+        reference_baseline = preflight_references(
+            [benchmark_case],
+            runner,
+            args.runs_root
+            / "benchmarks"
+            / "single_case"
+            / f"{benchmark_case.problem_id}_reference.json",
+        )
+        reference_result = reference_baseline["results"][0]
+        print(
+            "official_ref_on_golden_tb: "
+            f"{reference_result['status']} [{reference_result['category']}]"
+        )
+        if reference_result["status"] != "PASS":
+            parser.exit(
+                2,
+                "official reference does not pass this toolchain; "
+                "Agent evaluation was not started\n",
+            )
     try:
-        showcase.run(
+        summary = showcase.run(
             raw_spec,
             candidate_count=args.candidates,
             max_repairs=args.max_repairs,
         )
     except ShowcaseRunError as error:
         parser.exit(1, f"showcase error: {error}\n")
+    if reference_baseline is not None:
+        _print_reference_comparison(summary)
 
 
 def _prompt_for_spec(parser: argparse.ArgumentParser) -> str:
@@ -235,6 +272,26 @@ def _print_provider_config(settings: ProviderSettings, env_file: Path | None) ->
     print(f"env_file: {env_file or 'not used; values came from the shell'}")
     print("api_key: configured (value hidden)")
     print(f"required endpoint: POST {endpoint.rstrip('/')}/responses")
+
+
+def _print_reference_comparison(summary: dict) -> None:
+    verification = summary.get("verification") or {}
+    attempts = verification.get("attempts", [])
+    selected_id = summary.get("selected_candidate_id")
+    selected = next(
+        (attempt for attempt in attempts if attempt.get("candidate_id") == selected_id),
+        attempts[-1] if attempts else {},
+    )
+    mismatch = selected.get("debugger_feedback", {}).get("mismatch_summary", {})
+    mismatch_count = mismatch.get("total_mismatched_samples")
+    print("\n" + "=" * 72)
+    print("Agent RTL 与官方参考 RTL 对比结论")
+    print("=" * 72)
+    print("official_reference: PASS")
+    print(f"agent_candidate: {'PASS' if summary.get('verified_rtl') else 'FAIL'}")
+    print(f"selected_candidate: {selected_id}")
+    print(f"mismatches: {mismatch_count if mismatch_count is not None else 'unavailable'}")
+    print("acceptance_rule: official reference PASS 且 Agent mismatch=0 才算功能通过")
 
 
 if __name__ == "__main__":
