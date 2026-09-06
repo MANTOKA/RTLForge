@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verilog_agent.domain import Budget, EvaluationOutcome, EventType, TaskStage
+from verilog_agent.domain import (
+    Budget,
+    Candidate,
+    EvaluationOutcome,
+    EventType,
+    TaskStage,
+    VerificationOutcome,
+)
+from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
 from verilog_agent.testing import (
     FakeDebugger,
@@ -149,3 +157,140 @@ def test_static_syntax_failure_routes_to_debugger(tmp_path: Path) -> None:
     assert result.budget.repair_attempts == 1
     assert result.metadata["reflection_decision"]["policy"] == "SYNTAX_REFLECTION"
     assert EventType.REFLECTION_ROUTED in _event_types(orchestrator.store, result.task_id)
+
+
+class _NoProgressThenPassVerifier:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def verify(
+        self, context, candidate: Candidate
+    ) -> VerificationOutcome:
+        self.calls += 1
+        if self.calls == 1:
+            attempts = [
+                _functional_attempt("cand_02", 76),
+                _functional_attempt("cand_01", 76),
+            ]
+            passed = False
+            selected = "cand_02"
+        elif self.calls == 2:
+            attempts = [_functional_attempt(candidate.candidate_id, 76)]
+            passed = False
+            selected = candidate.candidate_id
+        else:
+            attempts = [_functional_attempt(candidate.candidate_id, 0)]
+            passed = True
+            selected = candidate.candidate_id
+        context.metadata["verification_attempts"] = attempts
+        context.metadata.setdefault("verification_history", []).append(
+            {
+                "cycle": self.calls,
+                "passed": passed,
+                "category": "OK" if passed else "FUNCTIONAL_MISMATCH",
+                "selected_candidate_id": selected,
+                "attempts": attempts,
+            }
+        )
+        return VerificationOutcome(
+            passed=passed,
+            category="OK" if passed else "FUNCTIONAL_MISMATCH",
+            details={"selected_candidate_id": selected},
+        )
+
+
+class _TrackingDebugger(FakeDebugger):
+    def __init__(self) -> None:
+        self.parent_ids: list[str] = []
+
+    def repair(self, context, candidate: Candidate) -> Candidate:
+        self.parent_ids.append(candidate.candidate_id)
+        return super().repair(context, candidate)
+
+
+class _MemoryDebugger(FakeDebugger):
+    def repair(self, context, candidate: Candidate) -> Candidate:
+        repaired = super().repair(context, candidate)
+        repaired.metadata.update(
+            rationale="Correct the counter boundary condition.",
+            expected_impact="Remove the functional mismatch.",
+        )
+        return repaired
+
+
+def _functional_attempt(candidate_id: str, mismatches: int) -> dict:
+    return {
+        "candidate_id": candidate_id,
+        "status": "PASS" if mismatches == 0 else "FAIL",
+        "category": "OK" if mismatches == 0 else "FUNCTIONAL_MISMATCH",
+        "debugger_feedback": {
+            "category": "FUNCTIONAL_MISMATCH",
+            "mismatch_summary": {
+                "total_mismatched_samples": mismatches,
+                "total_samples": 1003,
+            },
+        },
+    }
+
+
+def test_no_progress_repair_falls_back_to_unrepaired_original_candidate(
+    tmp_path: Path,
+) -> None:
+    debugger = _TrackingDebugger()
+    orchestrator = Orchestrator(
+        planner=FakePlanner(),
+        generator=FakeGenerator(),
+        debugger=debugger,
+        evaluator=FakeEvaluator(),
+        verifier=_NoProgressThenPassVerifier(),
+        store=SQLiteTaskStore(tmp_path / "fallback.sqlite"),
+    )
+    context = orchestrator.create_task(
+        "Create a counter",
+        task_id="task_fallback",
+        budget=Budget(max_candidates=2, max_repairs=2),
+    )
+    context.metadata["verification_order"] = ["cand_repair_01"]
+    context.metadata["initial_verification_order"] = ["cand_02", "cand_01"]
+
+    result = orchestrator.run_task(context.task_id)
+
+    assert result.current_stage is TaskStage.COMPLETED
+    assert debugger.parent_ids == ["cand_02", "cand_01"]
+    assert result.metadata["repair_fallback"] == {
+        "from_candidate_id": "cand_repair_01",
+        "to_candidate_id": "cand_01",
+        "reason": "previous repair made no functional mismatch improvement",
+    }
+    assert result.metadata["repair_attempts"][0]["mismatch_reduction"] == 0
+    assert result.metadata["repair_attempts"][1]["passed"] is True
+
+
+def test_orchestrator_records_failed_and_verified_repair_memory(tmp_path: Path) -> None:
+    memory = SQLiteMemoryStore(
+        tmp_path / "memory.sqlite", toolchain_version="sandbox:test"
+    )
+    orchestrator = Orchestrator(
+        planner=FakePlanner(),
+        generator=FakeGenerator(),
+        debugger=_MemoryDebugger(),
+        evaluator=FakeEvaluator(),
+        verifier=FakeVerifier(failures_before_pass=1),
+        store=SQLiteTaskStore(tmp_path / "tasks.sqlite"),
+        memory_store=memory,
+        memory_mode="read_write",
+    )
+    context = orchestrator.create_task(
+        "Create a counter",
+        task_id="task_memory",
+        metadata={"benchmark_problem_id": "Prob001_zero"},
+    )
+
+    result = orchestrator.run_task(context.task_id)
+
+    assert result.current_stage is TaskStage.COMPLETED
+    assert len(memory.list_attempts()) == 1
+    assert len(memory.list_memories()) == 1
+    assert result.metadata["memory_consolidations"][0]["source_problem_id"] == (
+        "Prob001_zero"
+    )

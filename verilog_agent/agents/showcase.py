@@ -9,6 +9,7 @@ from typing import NoReturn
 from verilog_agent.agents.generator import ArtifactRepository, RealGenerator
 from verilog_agent.agents.planner import RealPlanner
 from verilog_agent.domain import Budget, RTLTaskContext, TaskStage, TaskTreeNode
+from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
 from verilog_agent.orchestration.interfaces import Debugger
 from verilog_agent.providers import StructuredModelProvider
@@ -48,6 +49,8 @@ class PlannerGeneratorShowcase:
         evaluator: StaticCandidateEvaluator | None = None,
         verifier: GoldenTestbenchVerificationService | None = None,
         debugger: Debugger | None = None,
+        memory_store: SQLiteMemoryStore | None = None,
+        memory_mode: str = "off",
         emit: Callable[[str], None] = print,
     ) -> None:
         self.provider = provider
@@ -57,6 +60,8 @@ class PlannerGeneratorShowcase:
         self.evaluator = evaluator
         self.verifier = verifier
         self.debugger = debugger
+        self.memory_store = memory_store
+        self.memory_mode = memory_mode
         self.emit = emit
 
     def run(
@@ -65,6 +70,7 @@ class PlannerGeneratorShowcase:
         *,
         candidate_count: int = 2,
         max_repairs: int = 0,
+        task_metadata: dict | None = None,
     ) -> dict:
         store = SQLiteTaskStore(self.database)
         stop_after_generation = _StopAfterGeneration()
@@ -77,10 +83,13 @@ class PlannerGeneratorShowcase:
             evaluator=self.evaluator or stop_after_generation,
             verifier=self.verifier or stop_after_generation,
             store=store,
+            memory_store=self.memory_store,
+            memory_mode=self.memory_mode,
         )
         context = orchestrator.create_task(
             raw_spec,
             budget=Budget(max_candidates=candidate_count, max_repairs=max_repairs),
+            metadata=task_metadata,
         )
         task_root = self.runs_root / context.task_id
         task_root.mkdir(parents=True, exist_ok=True)
@@ -228,6 +237,14 @@ class PlannerGeneratorShowcase:
             "selected_candidate_id": context.selected_candidate_id,
             "selected_static_evaluation": static_evaluation,
             "verification": verification,
+            "repair_attempts": context.metadata.get("repair_attempts", []),
+            "repair_fallback": context.metadata.get("repair_fallback"),
+            "last_repair_analysis": context.metadata.get("last_repair_analysis"),
+            "memory": {
+                "mode": self.memory_mode,
+                "retrieved": context.metadata.get("retrieved_memories", []),
+                "consolidated": context.metadata.get("memory_consolidations", []),
+            },
             "events": [event.to_dict() for event in events],
         }
         summary_path = task_root / "showcase_summary.json"

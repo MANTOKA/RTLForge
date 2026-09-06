@@ -12,6 +12,7 @@ from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
 from verilog_agent.benchmarks.preflight import preflight_references
 from verilog_agent.benchmarks.verilogeval import load_human_v2
+from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
     ProviderConfigurationError,
@@ -49,6 +50,15 @@ def main() -> None:
     parser.add_argument("--offline-example", action="store_true")
     parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
+    parser.add_argument(
+        "--memory-mode",
+        choices=("off", "read_only", "read_write"),
+        default="off",
+        help="Retrieve/write verification-gated repair memories; defaults to off",
+    )
+    parser.add_argument(
+        "--memory-database", type=Path, default=Path("work/verilog_agent_memory.sqlite")
+    )
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
     parser.add_argument(
         "--model",
@@ -119,6 +129,8 @@ def main() -> None:
         parser.error("functional verification requires --static-evaluation")
     if args.max_repairs and args.testbench is None:
         parser.error("--max-repairs requires a golden --testbench or Human v2 case")
+    if args.memory_mode != "off" and not args.max_repairs:
+        parser.error("enabled Memory requires --max-repairs")
 
     if args.offline_example:
         if args.env_file is not None or args.check_config or args.model:
@@ -198,6 +210,14 @@ def main() -> None:
             if args.max_repairs
             else None
         ),
+        memory_store=(
+            SQLiteMemoryStore(
+                args.memory_database, toolchain_version=args.docker_image
+            )
+            if args.memory_mode != "off"
+            else None
+        ),
+        memory_mode=args.memory_mode,
     )
     reference_baseline = None
     if benchmark_case is not None and runner is not None:
@@ -231,6 +251,14 @@ def main() -> None:
             raw_spec,
             candidate_count=args.candidates,
             max_repairs=args.max_repairs,
+            task_metadata=(
+                {
+                    "benchmark_problem_id": benchmark_case.problem_id,
+                    "required_module_name": "TopModule",
+                }
+                if benchmark_case
+                else None
+            ),
         )
     except ShowcaseRunError as error:
         parser.exit(1, f"showcase error: {error}\n")

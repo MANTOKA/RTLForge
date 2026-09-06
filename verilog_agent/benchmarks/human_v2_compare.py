@@ -64,7 +64,13 @@ def compare_reports(
 def _validate_compatible(report_a: dict[str, Any], report_b: dict[str, Any]) -> None:
     config_a = report_a["configuration"]
     config_b = report_b["configuration"]
-    controlled_fields = ("base_url", "candidate_count", "max_repairs", "docker_image")
+    controlled_fields = (
+        "base_url",
+        "candidate_count",
+        "max_repairs",
+        "docker_image",
+        "memory_mode",
+    )
     changed = [
         field for field in controlled_fields if config_a.get(field) != config_b.get(field)
     ]

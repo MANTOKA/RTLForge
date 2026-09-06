@@ -64,6 +64,19 @@ def test_real_planner_builds_valid_domain_plan() -> None:
     assert provider.requests[0]["schema_name"] == "verilog_requirement_plan"
 
 
+def test_real_planner_honors_required_module_name_metadata() -> None:
+    provider = ScriptedProvider(counter_plan_payload())
+    context = RTLTaskContext(
+        task_id="task_benchmark_plan",
+        raw_spec="Create a four-bit counter",
+        metadata={"required_module_name": "TopModule"},
+    )
+
+    result = RealPlanner(provider).plan(context)
+
+    assert result.spec_ir.module_name == "TopModule"
+
+
 def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
     payload = counter_plan_payload()
     payload["clock"] = "q"

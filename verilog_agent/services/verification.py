@@ -91,7 +91,13 @@ class GoldenTestbenchVerificationService:
                 encoding="utf-8",
                 newline="\n",
             )
-            category = _verification_category(result, Path(current.artifact_path))
+            category = _verification_category(
+                result,
+                Path(current.artifact_path),
+                expected_module_name=(
+                    context.spec_ir.module_name if context.spec_ir is not None else None
+                ),
+            )
             attempt = {
                 "candidate_id": candidate_id,
                 "status": result.get("status", "FAIL"),
@@ -183,6 +189,18 @@ class GoldenTestbenchVerificationService:
         )
         context.metadata["verification_report"] = str(summary_path)
         context.metadata["verification_attempts"] = attempts
+        history = context.metadata.setdefault("verification_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    "cycle": len(history) + 1,
+                    "passed": passed,
+                    "category": category,
+                    "selected_candidate_id": selected_candidate_id,
+                    "attempts": attempts,
+                    "evidence_path": str(summary_path),
+                }
+            )
         return VerificationOutcome(
             passed=passed,
             category=category,
@@ -207,10 +225,19 @@ class GoldenTestbenchVerificationService:
         return order
 
 
-def _verification_category(result: dict[str, Any], candidate_path: Path) -> str:
+def _verification_category(
+    result: dict[str, Any],
+    candidate_path: Path,
+    expected_module_name: str | None = None,
+) -> str:
     if result.get("status") == "PASS":
         return "OK"
     if result.get("category") == "SYNTAX_ERROR":
+        if expected_module_name and any(
+            f"Unknown module type: {expected_module_name}" in str(error.get("message", ""))
+            for error in result.get("errors", [])
+        ):
+            return "INTERFACE_MISMATCH"
         diagnostic_files = {
             Path(str(error["file"])).name
             for error in result.get("errors", [])

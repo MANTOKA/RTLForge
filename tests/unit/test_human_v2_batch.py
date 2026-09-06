@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from verilog_agent.benchmarks.human_v2_batch import (
+    _functional_failure_ids,
     _markdown_report,
     _metrics,
     _result_from_summary,
+    _terminal_result,
 )
 
 
@@ -97,6 +99,8 @@ def test_markdown_report_contains_failure_reason_and_repair_count() -> None:
                 "status": "FAIL",
                 "failure_category": "FUNCTIONAL_MISMATCH",
                 "reason": "functional mismatch: 978/1619 samples",
+                "task_id": "task_failed",
+                "selected_candidate_id": "cand_02",
                 "repair_attempts": 1,
                 "verification_cycles": 2,
             }
@@ -107,3 +111,70 @@ def test_markdown_report_contains_failure_reason_and_repair_count() -> None:
 
     assert "978/1619" in markdown
     assert "| 1 | 2 |" in markdown
+    assert "task_failed" in markdown
+    assert "cand_02" in markdown
+
+
+def test_terminal_result_keeps_status_and_adds_traceability() -> None:
+    line = _terminal_result(
+        2,
+        10,
+        {
+            "problem_id": "Prob002_one",
+            "status": "FAIL",
+            "failure_category": "FUNCTIONAL_MISMATCH",
+            "repair_attempts": 2,
+            "task_id": "task_abc",
+            "selected_candidate_id": "cand_repair_02",
+            "reason": "functional mismatch: 4/20 samples",
+            "stop_reason": "repair budget exhausted",
+        },
+    )
+
+    assert "FAIL [FUNCTIONAL_MISMATCH] repairs=2" in line
+    assert "task_id=task_abc" in line
+    assert "selected=cand_repair_02" in line
+    assert "reason=functional mismatch: 4/20 samples" in line
+
+
+def test_terminal_pass_keeps_compact_status_and_selected_candidate() -> None:
+    line = _terminal_result(
+        1,
+        3,
+        {
+            "problem_id": "Prob001_zero",
+            "status": "PASS",
+            "failure_category": None,
+            "repair_attempts": 0,
+            "task_id": "task_pass",
+            "selected_candidate_id": "cand_02",
+        },
+    )
+
+    assert "PASS [OK] repairs=0" in line
+    assert "task_id=task_pass selected=cand_02" in line
+
+
+def test_failure_rerun_selects_only_functional_mismatches() -> None:
+    report = {
+        "results": [
+            {
+                "problem_id": "Prob001",
+                "status": "FAIL",
+                "failure_category": "FUNCTIONAL_MISMATCH",
+            },
+            {
+                "problem_id": "Prob002",
+                "status": "SKIPPED_REFERENCE",
+                "failure_category": "TOOL_INCOMPATIBILITY",
+            },
+            {
+                "problem_id": "Prob003",
+                "status": "FAIL",
+                "failure_category": "SYSTEM_ERROR",
+            },
+            {"problem_id": "Prob004", "status": "PASS", "failure_category": None},
+        ]
+    }
+
+    assert _functional_failure_ids(report) == {"Prob001"}

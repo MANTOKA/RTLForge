@@ -114,7 +114,13 @@ class RealPlanner:
             schema_name="verilog_requirement_plan",
             schema=PLAN_SCHEMA,
         )
-        return self._parse(payload, context.raw_spec)
+        result = self._parse(payload, context.raw_spec)
+        required_module_name = context.metadata.get("required_module_name")
+        if required_module_name is not None:
+            result.spec_ir.module_name = require_verilog_identifier(
+                required_module_name, "required_module_name"
+            )
+        return result
 
     @staticmethod
     def _parse(payload: dict[str, Any], raw_spec: str) -> PlanResult:

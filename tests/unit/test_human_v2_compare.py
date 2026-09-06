@@ -45,3 +45,13 @@ def test_compare_reports_rejects_changed_candidate_budget() -> None:
 
     with pytest.raises(ValueError, match="candidate_count"):
         compare_reports(report_a, report_b)
+
+
+def test_compare_reports_rejects_changed_memory_mode() -> None:
+    report_a = _report("model-a", ["PASS"])
+    report_b = _report("model-b", ["PASS"])
+    report_a["configuration"]["memory_mode"] = "off"
+    report_b["configuration"]["memory_mode"] = "read_write"
+
+    with pytest.raises(ValueError, match="memory_mode"):
+        compare_reports(report_a, report_b)

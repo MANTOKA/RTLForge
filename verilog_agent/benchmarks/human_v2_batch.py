@@ -17,6 +17,7 @@ from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
 from verilog_agent.benchmarks.preflight import preflight_references
 from verilog_agent.benchmarks.verilogeval import VerilogEvalCase, load_human_v2
+from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
     ProviderConfigurationError,
@@ -38,13 +39,27 @@ def main() -> int:
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
-    parser.add_argument("--max-repairs", type=int, choices=(0, 1, 2, 3), default=1)
+    parser.add_argument("--max-repairs", type=int, choices=(0, 1, 2, 3), default=2)
     parser.add_argument("--model", help="Override VERILOG_AGENT_MODEL for all LLM roles")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--docker-image", default="verilog-agent-sandbox:reflection")
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--database", type=Path, default=Path("work/human_v2_batch.sqlite"))
+    parser.add_argument(
+        "--memory-mode",
+        choices=("off", "read_only", "read_write"),
+        default="off",
+        help="Memory is off by default so benchmark baselines remain uncontaminated",
+    )
+    parser.add_argument(
+        "--memory-database", type=Path, default=Path("work/verilog_agent_memory.sqlite")
+    )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--rerun-failures-from",
+        type=Path,
+        help="Run only FUNCTIONAL_MISMATCH failures from an earlier JSON report",
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -53,6 +68,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
+    if args.resume and args.rerun_failures_from:
+        parser.error("--resume and --rerun-failures-from cannot be combined")
 
     load_dotenv(args.env_file, override=False)
     try:
@@ -64,12 +81,24 @@ def main() -> int:
         parser.error(str(error))
 
     cases = load_human_v2(args.dataset_root)
+    source_report = None
+    if args.rerun_failures_from:
+        source_report = json.loads(args.rerun_failures_from.read_text(encoding="utf-8"))
+        failed_ids = _functional_failure_ids(source_report)
+        cases = [case for case in cases if case.problem_id in failed_ids]
     if args.limit is not None:
         cases = cases[: args.limit]
-    output = args.output or (
-        args.runs_root / "benchmarks" / f"human_v2_batch_{_safe_name(settings.model)}.json"
-    )
+    output = args.output or _default_output(args, settings)
+    if args.rerun_failures_from and output.resolve() == args.rerun_failures_from.resolve():
+        parser.error("failure reruns require a new output file to preserve the source report")
     report = _initial_report(args, settings, len(cases))
+    if source_report is not None:
+        report["selection"] = {
+            "mode": "rerun_failures",
+            "source_report": str(args.rerun_failures_from),
+            "included_failure_categories": ["FUNCTIONAL_MISMATCH"],
+            "selected_problem_ids": [case.problem_id for case in cases],
+        }
     if args.resume and output.is_file():
         report = json.loads(output.read_text(encoding="utf-8"))
         try:
@@ -83,6 +112,11 @@ def main() -> int:
         args.runs_root,
         image=args.docker_image,
         readonly_roots=(args.dataset_root.resolve(),),
+    )
+    memory_store = (
+        SQLiteMemoryStore(args.memory_database, toolchain_version=args.docker_image)
+        if args.memory_mode != "off"
+        else None
     )
     for index, case in enumerate(cases, start=1):
         if case.problem_id in completed_ids:
@@ -127,15 +161,12 @@ def main() -> int:
                 runner=runner,
                 args=args,
                 reference=reference,
+                memory_store=memory_store,
             )
         report.pop("last_error", None)
         report.setdefault("results", []).append(result)
         _write_reports(output, report)
-        print(
-            f"[{index}/{len(cases)}] {case.problem_id}: {result['status']} "
-            f"[{result.get('failure_category') or 'OK'}] repairs={result['repair_attempts']}",
-            flush=True,
-        )
+        print(_terminal_result(index, len(cases), result), flush=True)
 
     _write_reports(output, report)
     metrics = _metrics(report.get("results", []))
@@ -156,6 +187,7 @@ def _run_case(
     runner: DockerEDARunner,
     args: argparse.Namespace,
     reference: dict[str, Any],
+    memory_store: SQLiteMemoryStore | None,
 ) -> dict[str, Any]:
     showcase = PlannerGeneratorShowcase(
         provider=provider,
@@ -176,12 +208,18 @@ def _run_case(
             else None
         ),
         emit=lambda _line: None,
+        memory_store=memory_store,
+        memory_mode=args.memory_mode,
     )
     try:
         summary = showcase.run(
             case.read_agent_spec(),
             candidate_count=args.candidates,
             max_repairs=args.max_repairs,
+            task_metadata={
+                "benchmark_problem_id": case.problem_id,
+                "required_module_name": "TopModule",
+            },
         )
     except ShowcaseRunError as error:
         return {
@@ -232,6 +270,10 @@ def _result_from_summary(
         "verification_cycles": verification_cycles,
         "passed_after_repair": bool(summary.get("verified_rtl") and repair_attempts),
         "mismatch_summary": mismatch,
+        "repair_attempt_details": summary.get("repair_attempts", []),
+        "repair_fallback": summary.get("repair_fallback"),
+        "stop_reason": _stop_reason(summary),
+        "memory": summary.get("memory", {"mode": "off"}),
         "timings_ms": summary.get("timings_ms", {}),
         "reference": reference,
         "summary_path": str(runs_root / str(summary.get("task_id")) / "showcase_summary.json"),
@@ -253,11 +295,27 @@ def _failure_reason(summary: dict[str, Any], mismatch: dict[str, Any]) -> str:
     total = mismatch.get("total_mismatched_samples")
     samples = mismatch.get("total_samples")
     if total is not None:
-        return f"functional mismatch: {total}/{samples} samples"
+        reason = f"functional mismatch: {total}/{samples} samples"
+        repairs = summary.get("repair_attempts", [])
+        if repairs:
+            last = repairs[-1]
+            if last.get("mismatch_reduction") is not None:
+                reason += (
+                    f"; last repair reduction={last['mismatch_reduction']} "
+                    f"({last.get('before_mismatches')}->{last.get('after_mismatches')})"
+                )
+        return reason
     for event in reversed(summary.get("events", [])):
         if event.get("event_type") == "EVENT_SYSTEM_FAILED":
             return str(event.get("payload", {}).get("reason", "unspecified failure"))
     return "unspecified failure"
+
+
+def _stop_reason(summary: dict[str, Any]) -> str | None:
+    for event in reversed(summary.get("events", [])):
+        if event.get("event_type") == "EVENT_SYSTEM_FAILED":
+            return str(event.get("payload", {}).get("reason", "unspecified failure"))
+    return None
 
 
 def _reference_reason(reference: dict[str, Any]) -> str:
@@ -284,6 +342,8 @@ def _initial_report(
             "max_repairs": args.max_repairs,
             "docker_image": args.docker_image,
             "dataset_root": str(args.dataset_root.resolve()),
+            "memory_mode": args.memory_mode,
+            "memory_database": str(args.memory_database),
             "requested_case_count": case_count,
             "oracle_visibility": {
                 "planner_generator": "prompt_only",
@@ -310,6 +370,8 @@ def _validate_resume(
         "max_repairs": args.max_repairs,
         "docker_image": args.docker_image,
         "dataset_root": str(args.dataset_root.resolve()),
+        "memory_mode": args.memory_mode,
+        "memory_database": str(args.memory_database),
     }
     mismatched = [key for key, value in expected.items() if configuration.get(key) != value]
     if mismatched:
@@ -334,6 +396,15 @@ def _metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
         "agent_pass_rate_evaluable": passed / evaluable if evaluable else 0.0,
         "passed_after_repair": sum(item.get("passed_after_repair", False) for item in results),
         "failure_categories": dict(sorted(categories.items())),
+    }
+
+
+def _functional_failure_ids(report: dict[str, Any]) -> set[str]:
+    return {
+        str(item["problem_id"])
+        for item in report.get("results", [])
+        if item.get("status") == "FAIL"
+        and item.get("failure_category") == "FUNCTIONAL_MISMATCH"
     }
 
 
@@ -362,6 +433,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Candidates per task: {config['candidate_count']}",
         f"- Maximum repairs: {config['max_repairs']}",
         f"- Docker image: `{config['docker_image']}`",
+        f"- Memory mode: `{config.get('memory_mode', 'off')}`",
         f"- Completed: {metrics['completed']}",
         f"- Evaluable: {metrics['evaluable']}",
         f"- Passed: {metrics['passed']}",
@@ -369,13 +441,17 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Passed after repair: {metrics['passed_after_repair']}",
         f"- Reference/tool anomalies: {metrics['reference_skipped']}",
         "",
-        "| Problem | Result | Failure category | Reason | Repairs | Verification cycles |",
-        "|---|---|---|---|---:|---:|",
+        (
+            "| Problem | Result | Task ID | Selected | Failure category | Reason | "
+            "Repairs | Verification cycles |"
+        ),
+        "|---|---|---|---|---|---|---:|---:|",
     ]
     for result in report.get("results", []):
         reason = _markdown_cell(result.get("reason", ""))
         lines.append(
             f"| {result['problem_id']} | {result['status']} | "
+            f"{result.get('task_id') or ''} | {result.get('selected_candidate_id') or ''} | "
             f"{result.get('failure_category') or ''} | {reason} | "
             f"{result['repair_attempts']} | "
             f"{result['verification_cycles']} |"
@@ -387,6 +463,31 @@ def _markdown_report(report: dict[str, Any]) -> str:
     else:
         lines.append("- None")
     return "\n".join(lines) + "\n"
+
+
+def _terminal_result(index: int, total: int, result: dict[str, Any]) -> str:
+    text = (
+        f"[{index}/{total}] {result['problem_id']}: {result['status']} "
+        f"[{result.get('failure_category') or 'OK'}] repairs={result['repair_attempts']}"
+    )
+    if result.get("task_id"):
+        text += f" task_id={result['task_id']}"
+    if result.get("selected_candidate_id"):
+        text += f" selected={result['selected_candidate_id']}"
+    if result.get("reason"):
+        text += f" reason={result['reason']}"
+    if result.get("stop_reason"):
+        text += f" stop={result['stop_reason']}"
+    return text
+
+
+def _default_output(args: argparse.Namespace, settings: ProviderSettings) -> Path:
+    if args.rerun_failures_from:
+        source = args.rerun_failures_from
+        return source.with_name(f"{source.stem}_functional_retry.json")
+    return (
+        args.runs_root / "benchmarks" / f"human_v2_batch_{_safe_name(settings.model)}.json"
+    )
 
 
 def _safe_name(value: str) -> str:

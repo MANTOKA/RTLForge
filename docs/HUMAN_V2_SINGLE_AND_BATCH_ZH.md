@@ -48,7 +48,7 @@ cd D:\AI\VerilogMulti\VerilogAgent
   --human-v2-case Prob155_lemmings4 `
   --candidates 2 `
   --static-evaluation `
-  --max-repairs 1 `
+  --max-repairs 2 `
   --docker-image verilog-agent-sandbox:reflection
 ```
 
@@ -86,7 +86,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 1 `
   --candidates 2 `
-  --max-repairs 1 `
+  --max-repairs 2 `
   --output runs\benchmarks\human_v2_smoke.json
 ```
 
@@ -97,12 +97,38 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 `
   --candidates 2 `
-  --max-repairs 1 `
+  --max-repairs 2 `
   --output runs\benchmarks\human_v2_dev10.json
 ```
 
 完整运行 156 题时删除 `--limit`。程序每完成一题都会重写 JSON 和 Markdown 报告；若中断，使用完全
 相同的配置和输出路径并添加 `--resume`，已记录的题不会重新调用模型。
+
+只重跑旧报告中的 `FUNCTIONAL_MISMATCH` 失败题，并使用最多 3 轮修复：
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --rerun-failures-from runs\benchmarks\human_v2_dev10.json `
+  --candidates 2 `
+  --max-repairs 3 `
+  --output runs\benchmarks\human_v2_dev10_functional_retry.json
+```
+
+该模式不会重跑 `TOOL_INCOMPATIBILITY` 或 `SYSTEM_ERROR`。前者需要换工具链，后者需要先恢复
+Docker/API 等基础设施；两者都不应交给 Debugger 修改 RTL。
+
+需要同时记录修复轨迹并让后续不同题目检索已验证修复经验时，可在上述命令加入：
+
+```powershell
+  --memory-mode read_write `
+  --memory-database work\verilog_agent_memory.sqlite
+```
+
+`off` 是正式无记忆基线的默认值；`read_only` 只检索不写入；`read_write` 会保存所有修复尝试，
+但只有最终通过 Verification 的修复才会形成可检索条目。同一个 Human v2 problem 不会检索自身经验，
+Memory 中也不保存 prompt、完整 RTL、golden testbench 或官方参考 RTL。成功经验的摘要不再额外调用
+一次 LLM，而是对已经由 Debugger 生成、且经过功能验证的 rationale 做确定性整理。
 
 报告包含：
 
@@ -120,14 +146,14 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 # 模型 A
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --limit 10 --candidates 2 --max-repairs 1 `
+  --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型A的实际API模型ID" `
   --output runs\benchmarks\human_v2_model_a.json
 
 # 模型 B
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --limit 10 --candidates 2 --max-repairs 1 `
+  --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型B的实际API模型ID" `
   --output runs\benchmarks\human_v2_model_b.json
 ```

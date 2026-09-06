@@ -251,6 +251,10 @@ class StaticCandidateEvaluator:
             ),
         )
         context.metadata["verification_order"] = [item.candidate_id for item in ranked]
+        if all(item.parent_id is None for item in candidates):
+            context.metadata["initial_verification_order"] = [
+                item.candidate_id for item in ranked
+            ]
         context.metadata["static_evaluation_report"] = str(report_path)
         selected = ranked[0]
         return EvaluationOutcome(True, selected.candidate_id, scores=scores)
