@@ -104,7 +104,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 完整运行 156 题时删除 `--limit`。程序每完成一题都会重写 JSON 和 Markdown 报告；若中断，使用完全
 相同的配置和输出路径并添加 `--resume`，已记录的题不会重新调用模型。
 
-只重跑旧报告中的 `FUNCTIONAL_MISMATCH` 失败题，并使用最多 3 轮修复：
+只重跑旧报告中的可修复失败题，并使用最多 3 轮修复：
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
@@ -115,8 +115,10 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
   --output runs\benchmarks\human_v2_dev10_functional_retry.json
 ```
 
-该模式不会重跑 `TOOL_INCOMPATIBILITY` 或 `SYSTEM_ERROR`。前者需要换工具链，后者需要先恢复
-Docker/API 等基础设施；两者都不应交给 Debugger 修改 RTL。
+该模式会重跑 `FUNCTIONAL_MISMATCH`，也会读取旧任务摘要，将“候选缺少 Human v2 要求的
+`TopModule`”这一类旧 `SYSTEM_ERROR` 纳入重跑；新版会先强制正确模块名，并将仍存在的该问题判为
+可修复的 `INTERFACE_MISMATCH`。它不会重跑 `TOOL_INCOMPATIBILITY` 或真正的 Docker/API
+`SYSTEM_ERROR`，因为这些问题不应交给 Debugger 修改 RTL。
 
 需要同时记录修复轨迹并让后续不同题目检索已验证修复经验时，可在上述命令加入：
 

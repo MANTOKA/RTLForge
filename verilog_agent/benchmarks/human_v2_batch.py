@@ -58,7 +58,10 @@ def main() -> int:
     parser.add_argument(
         "--rerun-failures-from",
         type=Path,
-        help="Run only FUNCTIONAL_MISMATCH failures from an earlier JSON report",
+        help=(
+            "Run only RTL-repairable failures from an earlier JSON report; excludes "
+            "tool incompatibility and infrastructure failures"
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -84,7 +87,7 @@ def main() -> int:
     source_report = None
     if args.rerun_failures_from:
         source_report = json.loads(args.rerun_failures_from.read_text(encoding="utf-8"))
-        failed_ids = _functional_failure_ids(source_report)
+        failed_ids = _rerunnable_failure_ids(source_report)
         cases = [case for case in cases if case.problem_id in failed_ids]
     if args.limit is not None:
         cases = cases[: args.limit]
@@ -96,7 +99,10 @@ def main() -> int:
         report["selection"] = {
             "mode": "rerun_failures",
             "source_report": str(args.rerun_failures_from),
-            "included_failure_categories": ["FUNCTIONAL_MISMATCH"],
+            "included_failure_categories": [
+                "FUNCTIONAL_MISMATCH",
+                "repairable SYSTEM_ERROR: missing TopModule",
+            ],
             "selected_problem_ids": [case.problem_id for case in cases],
         }
     if args.resume and output.is_file():
@@ -399,13 +405,42 @@ def _metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _functional_failure_ids(report: dict[str, Any]) -> set[str]:
-    return {
+def _rerunnable_failure_ids(report: dict[str, Any]) -> set[str]:
+    problem_ids = {
         str(item["problem_id"])
         for item in report.get("results", [])
         if item.get("status") == "FAIL"
         and item.get("failure_category") == "FUNCTIONAL_MISMATCH"
     }
+    for item in report.get("results", []):
+        if (
+            item.get("status") == "FAIL"
+            and item.get("failure_category") == "SYSTEM_ERROR"
+            and _missing_required_top_module(item)
+        ):
+            problem_ids.add(str(item["problem_id"]))
+    return problem_ids
+
+
+def _missing_required_top_module(result: dict[str, Any]) -> bool:
+    summary_value = result.get("summary_path")
+    if not summary_value:
+        return False
+    summary_path = Path(str(summary_value))
+    if not summary_path.is_file():
+        return False
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    attempts = (summary.get("verification") or {}).get("attempts", [])
+    return any(
+        "Unknown module type: TopModule" in str(error.get("message", ""))
+        for attempt in attempts
+        if isinstance(attempt, dict)
+        for error in attempt.get("debugger_feedback", {}).get("errors", [])
+        if isinstance(error, dict)
+    )
 
 
 def _write_reports(output: Path, report: dict[str, Any]) -> None:
@@ -484,7 +519,7 @@ def _terminal_result(index: int, total: int, result: dict[str, Any]) -> str:
 def _default_output(args: argparse.Namespace, settings: ProviderSettings) -> Path:
     if args.rerun_failures_from:
         source = args.rerun_failures_from
-        return source.with_name(f"{source.stem}_functional_retry.json")
+        return source.with_name(f"{source.stem}_repairable_retry.json")
     return (
         args.runs_root / "benchmarks" / f"human_v2_batch_{_safe_name(settings.model)}.json"
     )

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from verilog_agent.benchmarks.human_v2_batch import (
-    _functional_failure_ids,
     _markdown_report,
     _metrics,
+    _rerunnable_failure_ids,
     _result_from_summary,
     _terminal_result,
 )
@@ -155,7 +155,15 @@ def test_terminal_pass_keeps_compact_status_and_selected_candidate() -> None:
     assert "task_id=task_pass selected=cand_02" in line
 
 
-def test_failure_rerun_selects_only_functional_mismatches() -> None:
+def test_failure_rerun_selects_functional_and_repairable_interface_failures(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "system_summary.json"
+    summary_path.write_text(
+        '{"verification":{"attempts":[{"debugger_feedback":{"errors":['
+        '{"message":"Unknown module type: TopModule"}]}}]}}',
+        encoding="utf-8",
+    )
     report = {
         "results": [
             {
@@ -172,9 +180,15 @@ def test_failure_rerun_selects_only_functional_mismatches() -> None:
                 "problem_id": "Prob003",
                 "status": "FAIL",
                 "failure_category": "SYSTEM_ERROR",
+                "summary_path": str(summary_path),
             },
-            {"problem_id": "Prob004", "status": "PASS", "failure_category": None},
+            {
+                "problem_id": "Prob004",
+                "status": "FAIL",
+                "failure_category": "SYSTEM_ERROR",
+            },
+            {"problem_id": "Prob005", "status": "PASS", "failure_category": None},
         ]
     }
 
-    assert _functional_failure_ids(report) == {"Prob001"}
+    assert _rerunnable_failure_ids(report) == {"Prob001", "Prob003"}
