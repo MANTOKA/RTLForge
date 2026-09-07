@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def human_v2_run_root(base: Path, model: str) -> Path:
+    safe_model = "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in model
+    ).strip("_")
+    return base / "human-v2" / (safe_model.lower() or "model")
+
+
 @dataclass(frozen=True, slots=True)
 class VerilogEvalCase:
     problem_id: str
@@ -87,7 +95,7 @@ def main() -> int:
             readonly_roots=(dataset_root,),
         )
         output_path = (
-            args.runs_root / "benchmarks" / "verilogeval_human_v2_reference_preflight.json"
+            args.runs_root / "human-v2" / "reference" / "reference_preflight.json"
         )
         payload = preflight_references(cases, runner, output_path, limit=args.limit)
         terminal_payload = (

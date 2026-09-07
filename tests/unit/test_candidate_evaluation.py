@@ -193,6 +193,7 @@ def test_below_threshold_candidates_remain_as_verification_fallbacks(tmp_path: P
     assert outcome.accepted is True
     assert outcome.selected_candidate_id == "cand_01"
     assert context.metadata["verification_order"] == ["cand_01", "cand_02"]
+    assert context.metadata["initial_verification_order"] == ["cand_01", "cand_02"]
     assert all(
         candidate.metadata["static_evaluation"]["eligible_for_verification"]
         for candidate in context.candidates

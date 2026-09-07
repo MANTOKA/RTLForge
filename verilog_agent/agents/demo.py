@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,7 +10,9 @@ from dotenv import load_dotenv
 from verilog_agent.agents.debugger import RealDebugger
 from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
-from verilog_agent.benchmarks.verilogeval import load_human_v2
+from verilog_agent.benchmarks.preflight import preflight_references
+from verilog_agent.benchmarks.verilogeval import human_v2_run_root, load_human_v2
+from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
     ProviderConfigurationError,
@@ -45,9 +48,22 @@ def main() -> None:
         help="Natural-language RTL requirement; omit it to enter the requirement interactively",
     )
     parser.add_argument("--offline-example", action="store_true")
-    parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
+    parser.add_argument("--database", type=Path)
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
+    parser.add_argument(
+        "--memory-mode",
+        choices=("off", "read_only", "read_write"),
+        default="off",
+        help="Retrieve/write verification-gated repair memories; defaults to off",
+    )
+    parser.add_argument(
+        "--memory-database", type=Path
+    )
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
+    parser.add_argument(
+        "--model",
+        help="Override VERILOG_AGENT_MODEL for this run; applies to all three LLM roles",
+    )
     parser.add_argument(
         "--max-repairs",
         type=int,
@@ -113,10 +129,12 @@ def main() -> None:
         parser.error("functional verification requires --static-evaluation")
     if args.max_repairs and args.testbench is None:
         parser.error("--max-repairs requires a golden --testbench or Human v2 case")
+    if args.memory_mode != "off" and not args.max_repairs:
+        parser.error("enabled Memory requires --max-repairs")
 
     if args.offline_example:
-        if args.env_file is not None or args.check_config:
-            parser.error("--env-file and --check-config are only available in live mode")
+        if args.env_file is not None or args.check_config or args.model:
+            parser.error("--env-file, --check-config, and --model require live mode")
         if args.spec is not None:
             parser.error("--offline-example uses its built-in counter requirement; omit spec")
         if args.candidates != 2:
@@ -128,6 +146,8 @@ def main() -> None:
         loaded_env_file = _load_provider_environment(parser, args.env_file)
         try:
             settings = ProviderSettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
             provider = OpenAIResponsesProvider(settings)
         except ProviderConfigurationError as error:
             parser.error(str(error))
@@ -143,6 +163,17 @@ def main() -> None:
         provider_label = (
             f"openai_responses model={settings.model} endpoint={endpoint}{config_source}"
         )
+
+    if benchmark_case is not None:
+        group_root = human_v2_run_root(args.runs_root, settings.model)
+        args.runs_root = group_root / "tasks"
+        args.database = args.database or group_root / "state" / "showcase.sqlite"
+        args.memory_database = (
+            args.memory_database or group_root / "state" / "verilog_agent_memory.sqlite"
+        )
+    else:
+        args.database = args.database or Path("work/showcase.sqlite")
+        args.memory_database = args.memory_database or Path("work/verilog_agent_memory.sqlite")
 
     runner = (
         DockerEDARunner(
@@ -190,15 +221,59 @@ def main() -> None:
             if args.max_repairs
             else None
         ),
+        memory_store=(
+            SQLiteMemoryStore(
+                args.memory_database, toolchain_version=args.docker_image
+            )
+            if args.memory_mode != "off"
+            else None
+        ),
+        memory_mode=args.memory_mode,
     )
+    reference_baseline = None
+    if benchmark_case is not None and runner is not None:
+        print("\n" + "=" * 72)
+        print("Human v2 输入与官方参考基线")
+        print("=" * 72)
+        print(f"prompt_file: {benchmark_case.prompt_path}")
+        print(f"golden_testbench: {benchmark_case.testbench_path}")
+        print("Agent visibility: prompt only; testbench/ref contents are hidden")
+        reference_baseline = preflight_references(
+            [benchmark_case],
+            runner,
+            args.runs_root.parent
+            / "single-case"
+            / f"{benchmark_case.problem_id}_reference.json",
+        )
+        reference_result = reference_baseline["results"][0]
+        print(
+            "official_ref_on_golden_tb: "
+            f"{reference_result['status']} [{reference_result['category']}]"
+        )
+        if reference_result["status"] != "PASS":
+            parser.exit(
+                2,
+                "official reference does not pass this toolchain; "
+                "Agent evaluation was not started\n",
+            )
     try:
-        showcase.run(
+        summary = showcase.run(
             raw_spec,
             candidate_count=args.candidates,
             max_repairs=args.max_repairs,
+            task_metadata=(
+                {
+                    "benchmark_problem_id": benchmark_case.problem_id,
+                    "required_module_name": "TopModule",
+                }
+                if benchmark_case
+                else None
+            ),
         )
     except ShowcaseRunError as error:
         parser.exit(1, f"showcase error: {error}\n")
+    if reference_baseline is not None:
+        _print_reference_comparison(summary)
 
 
 def _prompt_for_spec(parser: argparse.ArgumentParser) -> str:
@@ -235,6 +310,26 @@ def _print_provider_config(settings: ProviderSettings, env_file: Path | None) ->
     print(f"env_file: {env_file or 'not used; values came from the shell'}")
     print("api_key: configured (value hidden)")
     print(f"required endpoint: POST {endpoint.rstrip('/')}/responses")
+
+
+def _print_reference_comparison(summary: dict) -> None:
+    verification = summary.get("verification") or {}
+    attempts = verification.get("attempts", [])
+    selected_id = summary.get("selected_candidate_id")
+    selected = next(
+        (attempt for attempt in attempts if attempt.get("candidate_id") == selected_id),
+        attempts[-1] if attempts else {},
+    )
+    mismatch = selected.get("debugger_feedback", {}).get("mismatch_summary", {})
+    mismatch_count = mismatch.get("total_mismatched_samples")
+    print("\n" + "=" * 72)
+    print("Agent RTL 与官方参考 RTL 对比结论")
+    print("=" * 72)
+    print("official_reference: PASS")
+    print(f"agent_candidate: {'PASS' if summary.get('verified_rtl') else 'FAIL'}")
+    print(f"selected_candidate: {selected_id}")
+    print(f"mismatches: {mismatch_count if mismatch_count is not None else 'unavailable'}")
+    print("acceptance_rule: official reference PASS 且 Agent mismatch=0 才算功能通过")
 
 
 if __name__ == "__main__":
