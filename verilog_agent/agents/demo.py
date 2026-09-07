@@ -11,7 +11,7 @@ from verilog_agent.agents.debugger import RealDebugger
 from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
 from verilog_agent.benchmarks.preflight import preflight_references
-from verilog_agent.benchmarks.verilogeval import load_human_v2
+from verilog_agent.benchmarks.verilogeval import human_v2_run_root, load_human_v2
 from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
@@ -48,7 +48,7 @@ def main() -> None:
         help="Natural-language RTL requirement; omit it to enter the requirement interactively",
     )
     parser.add_argument("--offline-example", action="store_true")
-    parser.add_argument("--database", type=Path, default=Path("work/showcase.sqlite"))
+    parser.add_argument("--database", type=Path)
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument(
         "--memory-mode",
@@ -57,7 +57,7 @@ def main() -> None:
         help="Retrieve/write verification-gated repair memories; defaults to off",
     )
     parser.add_argument(
-        "--memory-database", type=Path, default=Path("work/verilog_agent_memory.sqlite")
+        "--memory-database", type=Path
     )
     parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
     parser.add_argument(
@@ -164,6 +164,17 @@ def main() -> None:
             f"openai_responses model={settings.model} endpoint={endpoint}{config_source}"
         )
 
+    if benchmark_case is not None:
+        group_root = human_v2_run_root(args.runs_root, settings.model)
+        args.runs_root = group_root / "tasks"
+        args.database = args.database or group_root / "state" / "showcase.sqlite"
+        args.memory_database = (
+            args.memory_database or group_root / "state" / "verilog_agent_memory.sqlite"
+        )
+    else:
+        args.database = args.database or Path("work/showcase.sqlite")
+        args.memory_database = args.memory_database or Path("work/verilog_agent_memory.sqlite")
+
     runner = (
         DockerEDARunner(
             args.runs_root,
@@ -230,9 +241,8 @@ def main() -> None:
         reference_baseline = preflight_references(
             [benchmark_case],
             runner,
-            args.runs_root
-            / "benchmarks"
-            / "single_case"
+            args.runs_root.parent
+            / "single-case"
             / f"{benchmark_case.problem_id}_reference.json",
         )
         reference_result = reference_baseline["results"][0]

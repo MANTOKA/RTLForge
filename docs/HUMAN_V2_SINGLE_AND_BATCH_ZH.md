@@ -87,7 +87,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
   --limit 1 `
   --candidates 2 `
   --max-repairs 2 `
-  --output runs\benchmarks\human_v2_smoke.json
+  --output runs\human-v2\gpt-5.6-terra\reports\human_v2_smoke.json
 ```
 
 开发阶段运行前 10 题：
@@ -98,7 +98,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
   --limit 10 `
   --candidates 2 `
   --max-repairs 2 `
-  --output runs\benchmarks\human_v2_dev10.json
+  --output runs\human-v2\gpt-5.6-terra\reports\human_v2_dev10.json
 ```
 
 完整运行 156 题时删除 `--limit`。程序每完成一题都会重写 JSON 和 Markdown 报告；若中断，使用完全
@@ -109,10 +109,10 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --rerun-failures-from runs\benchmarks\human_v2_dev10.json `
+  --rerun-failures-from runs\human-v2\gpt-5.6-terra\reports\human_v2_dev10.json `
   --candidates 2 `
   --max-repairs 3 `
-  --output runs\benchmarks\human_v2_dev10_functional_retry.json
+  --output runs\human-v2\gpt-5.6-terra\reports\human_v2_dev10_functional_retry.json
 ```
 
 该模式会重跑 `FUNCTIONAL_MISMATCH`，也会读取旧任务摘要，将“候选缺少 Human v2 要求的
@@ -124,7 +124,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 
 ```powershell
   --memory-mode read_write `
-  --memory-database work\verilog_agent_memory.sqlite
+  --memory-database runs\human-v2\gpt-5.6-terra\state\verilog_agent_memory.sqlite
 ```
 
 `off` 是正式无记忆基线的默认值；`read_only` 只检索不写入；`read_write` 会保存所有修复尝试，
@@ -150,23 +150,23 @@ Memory 中也不保存 prompt、完整 RTL、golden testbench 或官方参考 RT
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型A的实际API模型ID" `
-  --output runs\benchmarks\human_v2_model_a.json
+  --output runs\human-v2\model-a\reports\human_v2_batch.json
 
 # 模型 B
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型B的实际API模型ID" `
-  --output runs\benchmarks\human_v2_model_b.json
+  --output runs\human-v2\model-b\reports\human_v2_batch.json
 ```
 
 两个运行都完成后生成配对比较报告：
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_compare `
-  runs\benchmarks\human_v2_model_a.json `
-  runs\benchmarks\human_v2_model_b.json `
-  --output runs\benchmarks\human_v2_model_comparison.md
+  runs\human-v2\model-a\reports\human_v2_batch.json `
+  runs\human-v2\model-b\reports\human_v2_batch.json `
+  --output runs\human-v2\model-comparisons.md
 ```
 
 比较器要求两份报告使用相同题目顺序、候选数、修复预算、Docker 镜像和评测协议，否则拒绝给出

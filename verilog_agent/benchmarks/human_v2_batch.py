@@ -16,7 +16,11 @@ from verilog_agent.agents.debugger import RealDebugger
 from verilog_agent.agents.generator import ArtifactRepository
 from verilog_agent.agents.showcase import PlannerGeneratorShowcase, ShowcaseRunError
 from verilog_agent.benchmarks.preflight import preflight_references
-from verilog_agent.benchmarks.verilogeval import VerilogEvalCase, load_human_v2
+from verilog_agent.benchmarks.verilogeval import (
+    VerilogEvalCase,
+    human_v2_run_root,
+    load_human_v2,
+)
 from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.providers import (
     OpenAIResponsesProvider,
@@ -43,17 +47,20 @@ def main() -> int:
     parser.add_argument("--model", help="Override VERILOG_AGENT_MODEL for all LLM roles")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--docker-image", default="verilog-agent-sandbox:reflection")
-    parser.add_argument("--runs-root", type=Path, default=Path("runs"))
-    parser.add_argument("--database", type=Path, default=Path("work/human_v2_batch.sqlite"))
+    parser.add_argument(
+        "--runs-root",
+        type=Path,
+        default=Path("runs"),
+        help="Base artifact directory; results are grouped by dataset and model",
+    )
+    parser.add_argument("--database", type=Path)
     parser.add_argument(
         "--memory-mode",
         choices=("off", "read_only", "read_write"),
         default="off",
         help="Memory is off by default so benchmark baselines remain uncontaminated",
     )
-    parser.add_argument(
-        "--memory-database", type=Path, default=Path("work/verilog_agent_memory.sqlite")
-    )
+    parser.add_argument("--memory-database", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--rerun-failures-from",
@@ -82,6 +89,13 @@ def main() -> int:
         provider = OpenAIResponsesProvider(settings)
     except ProviderConfigurationError as error:
         parser.error(str(error))
+
+    group_root = human_v2_run_root(args.runs_root, settings.model)
+    args.runs_root = group_root / "tasks"
+    args.database = args.database or group_root / "state" / "human_v2_batch.sqlite"
+    args.memory_database = (
+        args.memory_database or group_root / "state" / "verilog_agent_memory.sqlite"
+    )
 
     cases = load_human_v2(args.dataset_root)
     source_report = None
@@ -132,7 +146,7 @@ def main() -> int:
         reference = preflight_references(
             [case],
             runner,
-            args.runs_root / "benchmarks" / "reference" / f"{case.problem_id}.json",
+            group_root / "reference" / f"{case.problem_id}.json",
         )["results"][0]
         if reference["category"] == "SYSTEM_ERROR":
             report["last_error"] = {
@@ -520,9 +534,7 @@ def _default_output(args: argparse.Namespace, settings: ProviderSettings) -> Pat
     if args.rerun_failures_from:
         source = args.rerun_failures_from
         return source.with_name(f"{source.stem}_repairable_retry.json")
-    return (
-        args.runs_root / "benchmarks" / f"human_v2_batch_{_safe_name(settings.model)}.json"
-    )
+    return args.runs_root.parent / "reports" / "human_v2_batch.json"
 
 
 def _safe_name(value: str) -> str:

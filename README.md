@@ -4,7 +4,8 @@ VerilogAgent is an experimental multi-agent system for generating, checking, sim
 
 ## Current status
 
-The repository currently contains a restricted EDA sandbox baseline:
+The repository currently contains a restricted EDA sandbox and a first end-to-end RTL
+generation/verification/repair prototype:
 
 - Ubuntu 22.04 Docker image
 - Icarus Verilog compilation and simulation
@@ -13,11 +14,12 @@ The repository currently contains a restricted EDA sandbox baseline:
 - structured JSON diagnostics in `tool_wrapper.py`
 - non-root execution, disabled network, read-only root filesystem, resource limits, input
   path validation, subprocess timeouts, and isolated temporary outputs
-- small counter RTL and testbench fixtures
+- Human v2-derived regression RTL and testbench fixtures
 
 The hand-written RTL files under `tests/fixtures/` are stable regression inputs. They are
-not intended to represent Agent output. Future generated RTL belongs under `runs/<task_id>/`,
-which is excluded from Git.
+not intended to represent Agent output. Benchmark artifacts are grouped under
+`runs/<dataset>/<model>/`; Human v2 task artifacts therefore belong under
+`runs/human-v2/<model>/tasks/<task_id>/`. The entire `runs/` tree is excluded from Git.
 
 The Phase 2 implementation now includes versioned domain models, an explicit task state
 machine, SQLite events/checkpoints, budgets, cancellation, deterministic Fake Agents, and
@@ -28,11 +30,13 @@ the first real Debugger repair path are implemented; the browser UI is a later s
 [`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
 [`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md). A step-by-step Chinese demonstration guide is
 available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
-The first Human v2 development baseline and repair evidence are recorded in
-[`docs/HUMAN_V2_DEV_BASELINE_ZH.md`](docs/HUMAN_V2_DEV_BASELINE_ZH.md).
+The Human v2 full-baseline, targeted-rerun, Memory-MVP and single-case evidence are recorded in
+[`docs/HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`](docs/HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md).
 The live single-case workflow, resumable 156-case evaluation, and model-comparison
 commands are documented in
 [`docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md`](docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md).
+The Chinese project-status snapshot, including completed work, open boundaries and the next
+order, is [`docs/CURRENT_PROGRESS_ZH.md`](docs/CURRENT_PROGRESS_ZH.md).
 
 Run the classroom demonstrations separately in PowerShell:
 
@@ -94,17 +98,16 @@ docker run --rm --network none --read-only \
   --mount type=bind,source="${PWD}",target=/workspace,readonly \
   -e VERILOG_AGENT_INPUT_ROOT=/workspace/tests/fixtures \
   verilog-agent-sandbox \
-  python3 /workspace/tool_wrapper.py compile /workspace/tests/fixtures/counter.v
+  python3 /workspace/tool_wrapper.py compile /workspace/tests/fixtures/human_v2_prob035/TopModule.v
 ```
 
 ## Planned milestones
 
-1. Make the sandbox API deterministic, timeout-safe, and fully tested.
-2. Add typed request/result models and a single-task orchestrator.
-3. Add planner, RTL generator, evaluator, and debugger roles incrementally.
-4. Add a local API and chat-style browser UI.
-5. Package the complete stack with Docker Compose and document one-command startup.
-6. Add benchmark regression tests and reproducible evaluation reports.
+1. Freeze benchmark metadata and restore Docker integration execution in the active environment.
+2. Complete Memory consolidation and controlled Scoring × Memory ablations.
+3. Add a local API and chat-style browser UI.
+4. Package the complete stack with Docker Compose and document one-command startup.
+5. Run a pinned, reproducible full benchmark and publish the release report.
 
 ## Tests
 

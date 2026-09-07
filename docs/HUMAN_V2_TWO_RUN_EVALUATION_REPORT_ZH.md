@@ -4,9 +4,9 @@
 
 本报告基于以下两份机器生成的原始评测记录：
 
-- 第一次全量评测：`runs/benchmarks/human_v2_dev10.json`
-- 第二次失败题定向复测：`runs/benchmarks/human_v2_dev10_repairable_retry.json`
-- 第二次复测 Memory 数据库：`work/verilog_agent_memory.sqlite`
+- 第一次全量评测：`runs/human-v2/gpt-5.6-terra/reports/human_v2_dev10.json`
+- 第二次失败题定向复测：`runs/human-v2/gpt-5.6-terra/reports/human_v2_dev10_repairable_retry.json`
+- 第二次复测 Memory 数据库：`runs/human-v2/gpt-5.6-terra/state/verilog_agent_memory.sqlite`
 
 证据文件 SHA-256：
 
@@ -154,8 +154,8 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
   --candidates 2 --max-repairs 3 `
   --docker-image verilog-agent-sandbox:reflection `
   --memory-mode read_write `
-  --memory-database work\verilog_agent_memory.sqlite `
-  --output runs\benchmarks\human_v2_full.json
+  --memory-database runs\human-v2\gpt-5.6-terra\state\verilog_agent_memory.sqlite `
+  --output runs\human-v2\gpt-5.6-terra\reports\human_v2_full.json
 ```
 
 批量脚本对 `load_human_v2()` 返回的排序列表逐题执行，并在每题结束后更新 JSON/Markdown，因此
@@ -258,7 +258,9 @@ FUNCTIONAL_MISMATCH` 的检索粒度偏粗，导致不相关经验被跨题注�
 
 1. `Prob078_dualedge` 的原始 simulator 输出存在“单输出 mismatch 非零、聚合 mismatch 为 0”的
    不一致。第二次报告仍按旧解析器记录为 0/224；后续单题运行使用修正后的解析逻辑，从输出级计数
-   正确恢复出 `cand_01` 的 93/224，并验证 `cand_02` 为 0/224。
+   正确恢复出 `cand_01` 的 93/224，并验证 `cand_02` 为 0/224。当前实现保留原始 transcript，且在
+   aggregate 为 0、输出级计数非零时以输出级求和作为 `total_mismatched_samples`，避免该类真实失败
+   被误判为 PASS。
 2. 第二次批量复测中的 `Prob078_dualedge` 没有用满 3 轮：第三次 Debugger 返回了与父候选完全相同的
    RTL，被完整性检查拒绝。后续单题虽已 PASS，但属于重新生成候选后的新证据，不能修改原批次事实。
 3. 第二次批量复测中的 `Prob104_mt2015_muxdff` 用满 3 轮且始终为 1/199；后续单题第一轮仍无进展，

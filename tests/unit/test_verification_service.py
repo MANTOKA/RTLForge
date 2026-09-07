@@ -148,6 +148,33 @@ def test_debugger_feedback_includes_sanitized_mismatch_summary(tmp_path: Path) -
     assert "private oracle transcript" not in json.dumps(feedback)
 
 
+def test_debugger_feedback_uses_output_count_when_total_is_inconsistent(
+    tmp_path: Path,
+) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'q' has 93 mismatches. First mismatch occurred at time 10.\n"
+        "Hint: Total mismatched samples is 0 out of 224 samples\n"
+        "Mismatches: 0 in 224 samples\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    summary = outcome.details["debugger_feedback"]["mismatch_summary"]
+    assert summary["total_mismatched_samples"] == 93
+    assert summary["reported_total_mismatched_samples"] == 0
+    assert summary["total_source"] == "sum_of_output_mismatches"
+
+
 def test_verification_stops_on_infrastructure_failure(tmp_path: Path) -> None:
     context, runs_root, testbench = _context(tmp_path)
     service = GoldenTestbenchVerificationService(

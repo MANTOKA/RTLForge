@@ -171,6 +171,10 @@ runs/<task_id>/
 - Generator 确实调用模型生成不同 RTL 候选。
 - 输出通过了 JSON Schema、本地域模型、模块名、重复代码和路径安全检查。
 
-当前仍不能说明候选功能正确，因为 Candidate Evaluation 和 EDA Verification 尚未接入该演示。
-程序因此停在 `EVALUATING`，并写入 `verified_rtl=false`。下一阶段将自动显示每个候选的接口检查、
-lint/compile/quality 评分和淘汰原因；再下一阶段才执行仿真、分类修复和最终 RTL 验证。
+不带 `--static-evaluation` 的通用演示只证明规划和生成，仍会停在 `EVALUATING`，并写入
+`verified_rtl=false`。这不是系统能力边界，而是该轻量展示入口没有提供用户 testbench。
+
+对 Human v2 单题，使用 `--human-v2-root`、`--human-v2-case` 和 `--static-evaluation` 后，同一演示
+会继续显示每个候选的接口检查、Docker 编译/Lint/StaticScore、golden-testbench verification、候选
+回退，以及失败时的 Router/Debugger/复验。只有官方参考预检通过且 Agent 候选 `mismatch=0` 才会写入
+`verified_rtl=true`；具体命令见 `HUMAN_V2_SINGLE_AND_BATCH_ZH.md`。

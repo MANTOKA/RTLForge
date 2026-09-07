@@ -109,8 +109,8 @@ def _wrapper(
 
 
 @pytest.mark.integration
-def test_valid_counter_compiles(docker_image: str) -> None:
-    result = _wrapper(docker_image, "compile", "counter.v")
+def test_verified_human_v2_candidate_compiles(docker_image: str) -> None:
+    result = _wrapper(docker_image, "compile", "human_v2_prob035/TopModule.v")
 
     assert result["status"] == "PASS"
     assert result["errors"] == []
@@ -131,24 +131,32 @@ def test_valid_counter_compiles(docker_image: str) -> None:
 
 
 @pytest.mark.integration
-def test_invalid_counter_reports_line_seven(docker_image: str) -> None:
-    result = _wrapper(docker_image, "compile", "counter_bad.v")
+def test_real_rejected_candidate_reports_procedural_wire_error(
+    docker_image: str,
+) -> None:
+    result = _wrapper(docker_image, "compile", "human_v2_prob094_invalid/TopModule.v")
 
     assert result["status"] == "FAIL"
-    assert result["errors"][0]["line"] == 7
-    assert result["errors"][0]["message"] == "syntax error"
+    assert result["category"] == "SYNTAX_ERROR"
+    assert result["errors"][0]["line"] == 12
+    assert "not a valid l-value" in result["errors"][0]["message"]
 
 
 @pytest.mark.integration
-def test_valid_counter_passes_lint(docker_image: str) -> None:
-    result = _wrapper(docker_image, "lint", "counter.v")
+def test_verified_human_v2_candidate_passes_lint(docker_image: str) -> None:
+    result = _wrapper(docker_image, "lint", "human_v2_prob035/TopModule.v")
 
     assert result["status"] == "PASS"
 
 
 @pytest.mark.integration
-def test_counter_testbench_simulates(docker_image: str) -> None:
-    result = _wrapper(docker_image, "simulate", "tb_counter.v", "counter.v")
+def test_human_v2_counter_testbench_simulates(docker_image: str) -> None:
+    result = _wrapper(
+        docker_image,
+        "simulate",
+        "human_v2_prob035/tb.v",
+        "human_v2_prob035/TopModule.v",
+    )
 
     assert result["status"] == "PASS"
     assert "Simulation finished" in result["stdout"]
@@ -156,7 +164,12 @@ def test_counter_testbench_simulates(docker_image: str) -> None:
 
 @pytest.mark.integration
 def test_wrapper_does_not_write_build_products_to_repository(docker_image: str) -> None:
-    _wrapper(docker_image, "simulate", "tb_counter.v", "counter.v")
+    _wrapper(
+        docker_image,
+        "simulate",
+        "human_v2_prob035/tb.v",
+        "human_v2_prob035/TopModule.v",
+    )
 
     assert not (REPO_ROOT / "a.out").exists()
     assert not (REPO_ROOT / "sim.out").exists()
@@ -186,7 +199,7 @@ def test_input_outside_allowed_root_is_rejected(docker_image: str) -> None:
     result = _wrapper(
         docker_image,
         "compile",
-        "counter.v",
+        "human_v2_prob035/TopModule.v",
         environment={"VERILOG_AGENT_INPUT_ROOT": "/repo/tests/unit"},
     )
 
@@ -227,7 +240,7 @@ def test_zero_exit_nonzero_mismatch_count_is_not_treated_as_pass(
 
 @pytest.mark.integration
 def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> None:
-    result = _wrapper(docker_image, "eval_quality", "counter.v")
+    result = _wrapper(docker_image, "eval_quality", "human_v2_prob035/TopModule.v")
 
     assert result["status"] == "PASS"
     assert result["metrics"] == {
@@ -242,7 +255,7 @@ def test_quality_evaluation_returns_deterministic_metrics(docker_image: str) -> 
 
 @pytest.mark.integration
 def test_yosys_benchmark_returns_structural_metrics(docker_image: str) -> None:
-    result = _wrapper(docker_image, "benchmark", "counter.v")
+    result = _wrapper(docker_image, "benchmark", "human_v2_prob035/TopModule.v")
 
     assert result["status"] == "PASS"
     assert result["tool"] == "yosys"

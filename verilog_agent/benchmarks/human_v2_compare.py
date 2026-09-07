@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("runs/benchmarks/human_v2_model_comparison.md"),
+        default=Path("runs/human-v2/model-comparison.md"),
     )
     args = parser.parse_args()
     report_a = json.loads(args.report_a.read_text(encoding="utf-8"))

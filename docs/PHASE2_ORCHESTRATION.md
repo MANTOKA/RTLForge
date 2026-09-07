@@ -35,24 +35,11 @@ rollback, and recovery work without network access, API keys, model cost, prompt
 random model output. A failure therefore identifies an orchestration defect instead of an
 ambiguous model/provider problem.
 
-Real Planner and Generator now implement the same typed interfaces through a structured model
-Provider. Replacing their Fakes did not change the state machine or persistence format. The
-real Debugger is deliberately deferred to the repair slice. Candidate Evaluation and
-Verification remain deterministic services rather than LLM Agents.
+Real Planner, Generator and Debugger now implement the same typed interfaces through a
+structured model Provider. Replacing their Fakes did not change the state machine or persistence
+format. Candidate Evaluation, Verification and the Reflection Router remain deterministic
+services rather than LLM Agents. The current Human v2 path also supports candidate fallback,
+repair budgets, rollback and verification-gated Memory MVP writes.
 
-## Run the demonstrator
-
-From the repository root:
-
-```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.testing.demo `
-  --database work\fake-orchestrator.sqlite `
-  --failures-before-pass 1
-```
-
-The command deliberately fails verification once, creates one repaired candidate, then
-completes. It prints the final task context and the ordered persisted events as JSON. The
-database is under the Git-ignored `work/` directory.
-
-For the real Planner/Generator configuration and its current verification boundary, see
+For real-agent configuration and the verification boundary, see
 [`REAL_AGENTS.md`](REAL_AGENTS.md).

@@ -279,9 +279,20 @@ def _debugger_feedback(result: dict[str, Any], category: str) -> dict[str, Any]:
     ][:10]
     total = _TOTAL_MISMATCH_RE.search(stdout)
     if output_mismatches or total:
-        feedback["mismatch_summary"] = {
+        reported_total = int(total.group(1)) if total else None
+        observed_total = sum(item["mismatches"] for item in output_mismatches)
+        total_mismatched_samples = reported_total
+        summary: dict[str, Any] = {
             "outputs": output_mismatches,
-            "total_mismatched_samples": int(total.group(1)) if total else None,
+            "total_mismatched_samples": total_mismatched_samples,
             "total_samples": int(total.group(2)) if total else None,
         }
+        # Some Human v2 testbenches can report a non-zero per-output count while
+        # their aggregate counter remains zero. Preserve the raw transcript, but
+        # do not let that inconsistent aggregate hide a confirmed failure.
+        if reported_total == 0 and observed_total > 0:
+            summary["total_mismatched_samples"] = observed_total
+            summary["reported_total_mismatched_samples"] = reported_total
+            summary["total_source"] = "sum_of_output_mismatches"
+        feedback["mismatch_summary"] = summary
     return feedback

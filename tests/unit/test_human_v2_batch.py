@@ -3,12 +3,39 @@ from __future__ import annotations
 from pathlib import Path
 
 from verilog_agent.benchmarks.human_v2_batch import (
+    _default_output,
     _markdown_report,
     _metrics,
     _rerunnable_failure_ids,
     _result_from_summary,
     _terminal_result,
 )
+from verilog_agent.benchmarks.verilogeval import human_v2_run_root
+from verilog_agent.providers import ProviderSettings
+
+
+def test_human_v2_artifacts_are_grouped_by_dataset_and_model() -> None:
+    root = human_v2_run_root(Path("runs"), "gpt-5.6-terra")
+
+    assert root == Path("runs/human-v2/gpt-5.6-terra")
+
+
+def test_default_batch_report_uses_group_reports_directory() -> None:
+    args = type("Args", (), {})()
+    args.rerun_failures_from = None
+    args.runs_root = Path("runs/human-v2/gpt-5.6-terra/tasks")
+    settings = ProviderSettings(
+        api_key="test",
+        model="gpt-5.6-terra",
+        base_url=None,
+        timeout_seconds=30,
+        max_output_tokens=100,
+        max_retries=0,
+    )
+
+    assert _default_output(args, settings) == Path(
+        "runs/human-v2/gpt-5.6-terra/reports/human_v2_batch.json"
+    )
 
 
 def test_result_records_success_after_one_repair() -> None:
