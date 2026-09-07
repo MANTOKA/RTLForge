@@ -40,6 +40,30 @@
 API Key 没有写入报告。两次运行的模型、endpoint、候选数和 Docker 镜像一致，但最大修复轮数与
 Memory 配置不同，而且模型采样没有固定 seed，因此这不是严格的单变量消融实验。
 
+### 2.1 实验记录完整性标注
+
+下表把后续论文复现需要的字段明确区分为“已记录”和“未记录”。`NOT_RECORDED` 表示现有产物无法
+恢复准确数值，不能用猜测值补齐。
+
+| 字段 | 第一次全量评测 | 第二次定向复测 | 后续 `Prob078` 单题 | 后续 `Prob104` 单题 |
+|---|---|---|---|---|
+| prompt 版本 | 未单独编号；最接近代码快照为 `bb72bbb` | 未单独编号；最接近代码快照为 `a151ef0` | Agent prompt 与 `a151ef0` 相同；使用后续 Verification 解析修正 | 同左 |
+| Debugger 预算 | 1 | 3 | 3；实际 0 次 | 3；消耗 2 次调用预算，产生 1 个可验证修复候选 |
+| Icarus 版本 | 11.0 stable | 11.0 stable | 11.0 stable | 11.0 stable |
+| Docker 镜像 | `verilog-agent-sandbox:reflection` | 同左 | 同左 | 同左 |
+| golden 可见性 | Planner/Generator 不可见；Debugger 仅结构化诊断；Verifier 黑盒可见 | 相同 | 相同 | 相同 |
+| temperature | `provider_default`，未记录数值 | 同左 | `provider_default`，未记录数值 | 同左 |
+| top-p | `NOT_RECORDED` | `NOT_RECORDED` | `NOT_RECORDED` | `NOT_RECORDED` |
+| token 消耗 | `NOT_RECORDED` | `NOT_RECORDED` | `NOT_RECORDED` | `NOT_RECORDED` |
+| API 成本 | `NOT_RECORDED`，中转 endpoint 价格未知 | 同左 | 同左 | 同左 |
+| 墙钟时间 | 2:03:35.64 | 0:13:59.38 | 0:00:44.89 | 0:07:48.12 |
+| 超时/系统错误 | 2 个 Icarus 工具不兼容；1 个缺少 `TopModule` 的误分类 `SYSTEM_ERROR`；无明确 API timeout | 无 timeout/system error；2 个功能失败 | 无 | 第二次 Debugger 请求发生 `APITimeoutError` |
+
+Icarus 版本是在报告补充时从同名镜像实测得到；当前镜像 ID 为
+`sha256:0cb21ab7aa439b645a5765aec15b7f9bbb318b5a355e78543e19f1884948a56b`。由于原始 JSON
+只记录了可变 tag、没有记录 image ID，严格来说仍应把“历史运行使用完全相同镜像内容”视为高可信
+推断，而不是已被原始报告锁定的事实。后续正式实验必须在运行开始时直接写入 Icarus 版本和 image ID。
+
 ## 3. 第一次全量评测结果
 
 ### 3.1 总体指标
@@ -101,6 +125,42 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 - `271599f feat: improve repair fallback and add memory MVP`
 - `a151ef0 fix: rerun repairable Human v2 interface failures`
 
+### 4.1 可执行脚本位置
+
+| 用途 | Python 脚本 | 模块入口 |
+|---|---|---|
+| 单题可解释 Demo | `verilog_agent/agents/demo.py` | `python -m verilog_agent.agents.demo` |
+| Human v2 按题号顺序批量运行 | `verilog_agent/benchmarks/human_v2_batch.py` | `python -m verilog_agent.benchmarks.human_v2_batch` |
+| 156 题读取与排序 | `verilog_agent/benchmarks/verilogeval.py` 中的 `load_human_v2()` | 按 `*_prompt.txt` 文件名排序 |
+| Memory 写入/检索 | `verilog_agent/memory/store.py` | `SQLiteMemoryStore` |
+| Memory 数据模型 | `verilog_agent/memory/models.py` | `RepairAttempt`、`MemoryItem` |
+| Memory 与修复闭环连接 | `verilog_agent/orchestration/orchestrator.py` | `_record_repair_attempt()`、`_retrieve_memories()` |
+
+单题运行示例：
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
+  --human-v2-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --human-v2-case Prob078_dualedge `
+  --candidates 2 --static-evaluation --max-repairs 3 `
+  --docker-image verilog-agent-sandbox:reflection
+```
+
+156 题顺序运行示例；不传 `--limit` 即运行全部 156 题：
+
+```powershell
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --candidates 2 --max-repairs 3 `
+  --docker-image verilog-agent-sandbox:reflection `
+  --memory-mode read_write `
+  --memory-database work\verilog_agent_memory.sqlite `
+  --output runs\benchmarks\human_v2_full.json
+```
+
+批量脚本对 `load_human_v2()` 返回的排序列表逐题执行，并在每题结束后更新 JSON/Markdown，因此
+中断后可使用相同配置和 `--resume` 继续。
+
 ## 5. 第二次定向复测结果
 
 ### 5.1 总体指标
@@ -142,6 +202,27 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 `Prob147_circuit10` 的改善发生在重新生成候选后，没有触发 Debugger；由于 seed 未固定，不能把它
 单独归因于修复逻辑。`Prob131_mt2015_q4` 则与强制 `TopModule` 的确定性接口修正直接一致。
 
+### 5.3 后续单题 Demo 复核
+
+在上述两阶段评测完成后，又分别运行了 `Prob078_dualedge` 和 `Prob104_mt2015_muxdff`：
+
+| Problem | 测试时间（UTC+8） | Task ID | 单题结果 | 最终候选 | Debugger/停止原因 | Memory |
+|---|---|---|---|---|---|---|
+| `Prob078_dualedge` | 2026-09-07 18:09:29–18:10:14 | `task_ffc8d6c2030b` | PASS | `cand_02` | 0 次修复；初始 `cand_01` 为 93/224，随后 `cand_02` 为 0/224 | `off`，未写入 |
+| `Prob104_mt2015_muxdff` | 2026-09-07 18:17:17–18:25:05 | `task_bf8e9f2c711b` | FAIL | `cand_02`（回退目标） | 第 1 个修复候选仍为 1/199；切换 `cand_02` 后第二次 Debugger API 请求超时 | `off`，未写入 |
+
+`Prob078` 这次通过不是 Debugger 或 Memory 的作用，而是未固定 seed 的新一轮 Generator 生成了不同
+的第二候选。失败的 `cand_01` 使用时钟电平直接选择两个边沿寄存器，得到 93 个 `q` mismatch；通过的
+`cand_02` 则先分别生成 `clk & d_rise` 和 `~clk & d_fall` 两个中间 wire，再用第二级连续赋值 OR 输出。
+对 golden testbench 的事后审计表明，参考实现特意通过 `always @(*)` 中的非阻塞赋值引入 delta-cycle
+延迟；新 `cand_02` 的两级连续赋值传播恰好与该仿真调度对齐，而前一次批量运行生成的直接 ternary
+或阻塞组合选择会过早改变 `q`。因此，本次 PASS 更像是“新候选匹配了 golden 仿真调度语义”，不能
+视为同一 RTL 的稳定重现，也不能证明真实硬件存在对应的物理延迟。
+
+上述 golden 细节只用于测试后的人工原因分析，没有进入 Planner、Generator、Debugger 或 Memory。
+若把最新单题 PASS 作为补充证据回填，则当前暂定有效结果为 153/154，即 **99.35%**；按全部 156 题
+计算为 153/156，即 98.08%。这不是新的全量运行结果，必须与第二次批量回填结果 152/154 分开报告。
+
 ## 6. Memory 写入结果
 
 第二次复测共记录 13 条 `RepairAttempt`，其中 5 条最终通过 Verification，并各自形成 1 条
@@ -159,6 +240,14 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 当前写入门限的预期行为。5 条成功经验都保留在数据库中，但前 4 条在后续题目中累计达到两次负迁移，
 已被安全策略标记为 `QUARANTINED`，不会继续检索；只有 `Prob154_fsm_ps2data` 的经验仍为 `ACTIVE`。
 
+后续单题 `Prob078` 同样没有写入 Memory，原因有两个：运行参数是 `memory_mode=off`，并且它由原始
+候选 `cand_02` 直接通过，没有产生 Debugger repair trajectory。当前写入机制位于
+`Orchestrator._record_repair_attempt()`：每个 Debugger 子候选完成 Verification 后构造并保存
+`RepairAttempt`；只有 `memory_mode=read_write`、`passed=true`、最终 mismatch 为 0（或该验证类型没有
+mismatch 计数）且 rationale/expected impact 非空时，`SQLiteMemoryStore.record_repair_attempt()` 才会
+调用 `_consolidate()` 和 `_upsert_memory()` 形成可检索 `MemoryItem`。直接生成即通过的 RTL 目前只保留
+任务产物和验证证据，不进入 repair memory。
+
 这一结果证明了 Memory 的“写入、检索、使用反馈、负迁移隔离”链路已经实际运行，但不能据此声称
 Memory 提升了总体准确率。事实上，成功项中只有 `Prob053` 和 `Prob063` 的修复使用了检索经验；
 `Prob034`、`Prob062`、`Prob154` 的最终成功修复没有使用 Memory。当前 `generic_rtl +
@@ -168,12 +257,12 @@ FUNCTIONAL_MISMATCH` 的检索粒度偏粗，导致不相关经验被跨题注�
 ## 7. 剩余问题与结论边界
 
 1. `Prob078_dualedge` 的原始 simulator 输出存在“单输出 mismatch 非零、聚合 mismatch 为 0”的
-   不一致。第二次报告仍按旧解析器记录为 0/224，导致 Debugger 收到的进展信号不准确；当前工作区
-   已出现针对该解析问题的未提交修改，但它不属于本次第二次运行的已验证结果。
-2. `Prob078_dualedge` 没有用满 3 轮：第三次 Debugger 返回了与父候选完全相同的 RTL，被完整性检查
-   拒绝，任务以 `ORCHESTRATION_ERROR` 停止。批量摘要优先展示最后一次 Verification 类别，因此表面
-   仍显示 `FUNCTIONAL_MISMATCH`，后续应同时保留“功能根因”和“实际停止类别”。
-3. `Prob104_mt2015_muxdff` 已用满 3 轮且 mismatch 始终为 1/199，需要更细的首个 mismatch 时间、
+   不一致。第二次报告仍按旧解析器记录为 0/224；后续单题运行使用修正后的解析逻辑，从输出级计数
+   正确恢复出 `cand_01` 的 93/224，并验证 `cand_02` 为 0/224。
+2. 第二次批量复测中的 `Prob078_dualedge` 没有用满 3 轮：第三次 Debugger 返回了与父候选完全相同的
+   RTL，被完整性检查拒绝。后续单题虽已 PASS，但属于重新生成候选后的新证据，不能修改原批次事实。
+3. 第二次批量复测中的 `Prob104_mt2015_muxdff` 用满 3 轮且始终为 1/199；后续单题第一轮仍无进展，
+   回退后又遇到 API timeout。该题需要更细的首个 mismatch 时间、
    输出级证据或时序语义分类，继续增加相同诊断下的修复次数意义有限。
 4. 两道 Icarus cast 不兼容题仍应单列工具链异常。可使用支持相应 SystemVerilog cast 的仿真器复核，
    但不应通过修改 Agent RTL 来“适配”官方 testbench。
@@ -184,3 +273,7 @@ FUNCTIONAL_MISMATCH` 的检索粒度偏粗，导致不相关经验被跨题注�
 可修复失败题应用新闭环后有 7 题通过，使合并后的有效结果达到 98.70%。候选回退在 `Prob034` 和
 `Prob062` 中留下了直接运行证据，Memory 也完成了真实写入与负迁移隔离，但 Memory 的独立增益尚未
 通过受控 A/B 实验验证。
+
+后续单题证据进一步使 `Prob078_dualedge` 通过，但原因是重新生成的候选恰好符合 golden 的 delta-cycle
+调度语义，而非 Debugger 或 Memory 修复。因而最新补充口径可写为 153/154（99.35%），正式论文指标
+仍应以一次固定 prompt、固定采样参数、固定镜像 digest、完整顺序运行的 156 题实验为准。
