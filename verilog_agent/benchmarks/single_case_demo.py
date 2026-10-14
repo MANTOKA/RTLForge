@@ -55,7 +55,19 @@ def main(*, dataset_kind: str = "human_v2") -> None:
         help="Natural-language RTL requirement; omit it to enter the requirement interactively",
     )
     parser.add_argument("--offline-example", action="store_true")
+    parser.add_argument(
+        "--orchestrator", choices=("legacy", "langgraph"), default="legacy",
+        help="Select the existing Orchestrator or the M1 LangGraph scheduling entry",
+    )
     parser.add_argument("--database", type=Path)
+    parser.add_argument(
+        "--coding-style", choices=("strict_sv", "legacy_verilog"),
+        help="Task-level DUT coding policy; benchmark tasks default to legacy_verilog",
+    )
+    parser.add_argument(
+        "--reference-file", type=Path, action="append", default=[],
+        help="Allowlist a read-only reference for the LangGraph Planner",
+    )
     parser.add_argument("--task-id", help=argparse.SUPPRESS)
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument(
@@ -178,6 +190,12 @@ def main(*, dataset_kind: str = "human_v2") -> None:
         and not args.check_config
     ):
         parser.error("functional verification requires --static-evaluation")
+    if args.orchestrator == "langgraph" and not args.static_evaluation:
+        parser.error("LangGraph mode requires --static-evaluation")
+    if args.reference_file and (args.orchestrator != "langgraph" or benchmark_case):
+        parser.error("--reference-file is only for non-benchmark LangGraph tasks")
+    if any(not path.is_file() for path in args.reference_file):
+        parser.error("every --reference-file must be an existing file")
     if args.max_repairs and args.testbench is None:
         parser.error("--max-repairs requires a golden --testbench or Human v2 case")
     if args.memory_mode != "off" and not args.max_repairs:
@@ -193,6 +211,20 @@ def main(*, dataset_kind: str = "human_v2") -> None:
         raw_spec = OFFLINE_COUNTER_SPEC
         provider = ScriptedProvider(
             counter_plan_payload(),
+            *(
+                ({
+                    "testbench": (
+                        "module tb; reg clk=0, rst=1; wire [3:0] q; counter dut(clk,rst,q); "
+                        "always #5 clk=~clk; initial begin @(negedge clk); "
+                        "if(q!==0) $fatal(1,\"reset\"); rst=0; @(negedge clk); "
+                        "if(q!==1) $fatal(1,\"increment\"); "
+                        "$display(\"GENERATED_TB_PASS\"); $finish; end "
+                        "initial begin #100; $fatal(1,\"timeout\"); end endmodule"
+                    ),
+                    "test_objectives": ["同步复位", "递增"],
+                },)
+                if args.orchestrator == "langgraph" else ()
+            ),
             *({"candidates": [item]} for item in counter_candidate_payload()["candidates"]),
         )
         provider_label = "scripted_offline_example (NO LLM API CALL)"
@@ -287,6 +319,7 @@ def main(*, dataset_kind: str = "human_v2") -> None:
             else None
         ),
         memory_mode=args.memory_mode,
+        orchestrator_kind=args.orchestrator,
     )
     reference_baseline = None
     if benchmark_case is not None and runner is not None:
@@ -333,9 +366,15 @@ def main(*, dataset_kind: str = "human_v2") -> None:
                         benchmark_case, "module_name", "TopModule"
                     ),
                     "benchmark_dataset": dataset_label,
+                    "coding_style_constraint": args.coding_style or "legacy_verilog",
                 }
                 if benchmark_case
-                else None
+                else {
+                    "reference_files": [str(path.resolve()) for path in args.reference_file],
+                    **({"coding_style_constraint": args.coding_style}
+                       if args.coding_style else ({"coding_style_constraint": "legacy_verilog"}
+                                                  if args.offline_example else {})),
+                }
             ),
         )
     except ShowcaseRunError as error:

@@ -89,6 +89,7 @@ class RealGenerator:
                 ),
                 "spec_ir": context.spec_ir.to_dict(),
                 "task_tree_root": context.task_tree_root.to_dict(),
+                "test_objectives": context.metadata.get("generated_test_objectives", []),
                 "retrieved_verified_design_patterns": context.metadata.get(
                     "retrieved_design_patterns", []
                 ),
@@ -97,7 +98,13 @@ class RealGenerator:
             sort_keys=True,
         )
         payload = self.provider.generate_structured(
-            instructions=GENERATOR_INSTRUCTIONS,
+            instructions=(
+                GENERATOR_INSTRUCTIONS
+                if context.spec_ir.coding_style_constraint == "legacy_verilog"
+                else GENERATOR_INSTRUCTIONS
+                + " For strict_sv, use synthesizable SystemVerilog always_ff/always_comb, "
+                "never use initial blocks in DUT, and avoid inferred latches."
+            ),
             input_text=prompt,
             schema_name="verilog_rtl_candidates",
             schema=schema,

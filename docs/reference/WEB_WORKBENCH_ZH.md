@@ -1,6 +1,6 @@
 # VerilogAgent 本地 Web 工作台
 
-第一版实现对应 [产品规格](WEB_UI_PRODUCT_SPEC_ZH.md) 与 [实施提示](WEB_UI_IMPLEMENTATION_PROMPT_ZH.md)。无需安装额外的 Web 框架；仍需按原项目要求配置 `.env`、数据集和 Docker 镜像，运行任务会调用真实 LLM，浏览历史不会。
+第一版实现无需安装额外的 Web 框架；仍需按原项目要求配置 `.env`、数据集和 Docker 镜像，运行任务会调用真实 LLM，浏览历史不会。产品规格与实施提示尚是本地草案，未纳入此仓库。
 
 在仓库根目录启动：
 

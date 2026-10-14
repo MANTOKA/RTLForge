@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ def prompt_source_version() -> str:
     root = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256()
     for relative in ("agents/planner.py", "agents/generator.py", "agents/debugger.py",
-                     "providers/openai_responses.py"):
+                     "agents/testbench.py", "providers/openai_responses.py"):
         digest.update(relative.encode("utf-8"))
         digest.update((root / relative).read_text(encoding="utf-8").encode("utf-8"))
     return "sha256:" + digest.hexdigest()
@@ -102,7 +103,12 @@ class RecordingProvider:
         token = _response.set(record)
         started = perf_counter()
         try:
-            return self.provider.generate_structured(**kwargs)
+            call = self.provider.generate_structured
+            if os.environ.get("LANGSMITH_TRACING", "").lower() == "true":
+                from langsmith import traceable
+
+                call = traceable(run_type="llm", name=f"{self.role}_structured_call")(call)
+            return call(**kwargs)
         except Exception as error:
             record["status"] = "ERROR"
             record["error_type"] = type(error).__name__

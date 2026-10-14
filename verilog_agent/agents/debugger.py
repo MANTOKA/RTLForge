@@ -74,7 +74,12 @@ class RealDebugger:
             sort_keys=True,
         )
         payload = self.provider.generate_structured(
-            instructions=DEBUGGER_INSTRUCTIONS,
+            instructions=(
+                DEBUGGER_INSTRUCTIONS
+                if context.spec_ir.coding_style_constraint == "legacy_verilog"
+                else DEBUGGER_INSTRUCTIONS
+                + " For strict_sv, keep synthesizable always_ff/always_comb and no DUT initial."
+            ),
             input_text=prompt,
             schema_name="verilog_rtl_repair",
             schema=self._schema(),

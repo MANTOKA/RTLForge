@@ -8,6 +8,7 @@ from typing import NoReturn
 
 from verilog_agent.agents.generator import ArtifactRepository, RealGenerator
 from verilog_agent.agents.planner import RealPlanner
+from verilog_agent.agents.testbench import RealTestbenchGenerator
 from verilog_agent.domain import Budget, RTLTaskContext, TaskStage, TaskTreeNode
 from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
@@ -55,6 +56,7 @@ class PlannerGeneratorShowcase:
         debugger: Debugger | None = None,
         memory_store: SQLiteMemoryStore | None = None,
         memory_mode: str = "off",
+        orchestrator_kind: str = "legacy",
         emit: Callable[[str], None] = print,
     ) -> None:
         self.provider = provider
@@ -66,6 +68,9 @@ class PlannerGeneratorShowcase:
         self.debugger = debugger
         self.memory_store = memory_store
         self.memory_mode = memory_mode
+        if orchestrator_kind not in {"legacy", "langgraph"}:
+            raise ValueError("orchestrator_kind must be legacy or langgraph")
+        self.orchestrator_kind = orchestrator_kind
         self.emit = emit
 
     def run(
@@ -77,6 +82,14 @@ class PlannerGeneratorShowcase:
         task_metadata: dict | None = None,
         task_id: str | None = None,
     ) -> dict:
+        if self.orchestrator_kind == "langgraph":
+            return self._run_graph(
+                raw_spec,
+                candidate_count=candidate_count,
+                max_repairs=max_repairs,
+                task_metadata=task_metadata,
+                task_id=task_id,
+            )
         store = SQLiteTaskStore(self.database)
         stop_after_generation = _StopAfterGeneration()
         orchestrator = Orchestrator(
@@ -94,7 +107,13 @@ class PlannerGeneratorShowcase:
         context = orchestrator.create_task(
             raw_spec,
             budget=Budget(max_candidates=candidate_count, max_repairs=max_repairs),
-            metadata=task_metadata,
+            metadata={
+                **(task_metadata or {}),
+                "experiment_tags": [
+                    *(task_metadata or {}).get("experiment_tags", []),
+                    "orchestrator=legacy_orchestrator",
+                ],
+            },
             task_id=task_id,
         )
         task_root = self.runs_root / context.task_id
@@ -290,6 +309,91 @@ class PlannerGeneratorShowcase:
             self.emit("真实 Debugger 闭环已结束；结果与 diff 见完整摘要和候选目录。")
         else:
             self.emit("下一步尚未执行：testbench 仿真、失败分类和 Debugger 修复。")
+        return summary
+
+    def _run_graph(
+        self,
+        raw_spec: str,
+        *,
+        candidate_count: int,
+        max_repairs: int,
+        task_metadata: dict | None,
+        task_id: str | None,
+    ) -> dict:
+        from verilog_agent.orchestration.graph import LangGraphOrchestrator
+
+        if self.evaluator is None:
+            raise ShowcaseRunError("LangGraph mode requires static evaluation and an EDA runner")
+        runner = self.evaluator.runner
+        if not hasattr(runner, "run_files"):
+            raise ShowcaseRunError("LangGraph mode requires a multi-file EDA runner")
+        stop_after_generation = _StopAfterGeneration()
+        store = SQLiteTaskStore(self.database)
+        orchestrator = LangGraphOrchestrator(
+            planner=RealPlanner(self.provider),
+            generator=RealGenerator(self.provider, artifacts=ArtifactRepository(self.runs_root)),
+            testbench_agent=RealTestbenchGenerator(self.provider),
+            debugger=self.debugger or stop_after_generation,
+            evaluator=self.evaluator,
+            verifier=self.verifier or stop_after_generation,
+            generated_tb_runner=runner,
+            has_golden_testbench=self.verifier is not None,
+            runs_root=self.runs_root,
+            store=store,
+            memory_store=self.memory_store,
+            memory_mode=self.memory_mode,
+        )
+        context = orchestrator.create_task(
+            raw_spec,
+            budget=Budget(max_candidates=candidate_count, max_repairs=max_repairs),
+            metadata=task_metadata,
+            task_id=task_id,
+        )
+        task_root = self.runs_root / context.task_id
+        task_root.mkdir(parents=True, exist_ok=True)
+        context.metadata["model_calls_path"] = str(task_root / "model_calls.jsonl")
+        (task_root / "input.txt").write_text(raw_spec + "\n", encoding="utf-8", newline="\n")
+        context = orchestrator.run_task(context.task_id)
+        verification = None
+        report_path = context.metadata.get("verification_report")
+        if report_path:
+            verification = json.loads(Path(report_path).read_text(encoding="utf-8"))
+        summary = {
+            "task_id": context.task_id,
+            "input": raw_spec,
+            "orchestrator": "langgraph",
+            "experiment_tags": context.metadata.get("experiment_tags", []),
+            "current_stage": context.current_stage.value,
+            "final_status": context.metadata.get("final_status"),
+            "verified_rtl": context.metadata.get("golden_tb_pass") is True,
+            "generated_tb_pass": context.metadata.get("generated_tb_pass"),
+            "generated_testbench_path": context.metadata.get("generated_testbench_path"),
+            "test_objectives": context.metadata.get("generated_test_objectives", []),
+            "model_calls": context.metadata.get("model_calls", []),
+            "token_usage": summarize_calls(context.metadata.get("model_calls", [])),
+            "spec_ir": context.spec_ir.to_dict() if context.spec_ir else None,
+            "task_tree": context.task_tree_root.to_dict() if context.task_tree_root else None,
+            "candidates": [candidate.to_dict() for candidate in context.candidates],
+            "selected_candidate_id": context.selected_candidate_id,
+            "candidate_policy": context.metadata.get("candidate_policy"),
+            "candidate_regenerations": context.metadata.get("candidate_regenerations", []),
+            "budget": context.budget.to_dict(),
+            "verification": verification,
+            "repair_attempts": context.metadata.get("repair_attempts", []),
+            "memory": {
+                "mode": self.memory_mode,
+                "retrieved": context.metadata.get("retrieved_memories", []),
+                "consolidated": context.metadata.get("memory_consolidations", []),
+            },
+            "events": [event.to_dict() for event in store.list_events(context.task_id)],
+        }
+        path = task_root / "showcase_summary.json"
+        self._write_json(path, summary)
+        self.emit(f"LangGraph task: {context.task_id}")
+        self.emit(f"final_status: {summary['final_status']}")
+        self.emit(f"generated_tb_pass: {summary['generated_tb_pass']}")
+        self.emit(f"golden_verified: {summary['verified_rtl']}")
+        self.emit(f"summary: {path.as_posix()}")
         return summary
 
     @staticmethod

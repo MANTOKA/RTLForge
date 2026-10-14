@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -277,8 +278,10 @@ class StaticCandidateEvaluator:
     @staticmethod
     def _failure_category(report: dict[str, Any]) -> str:
         results = report.get("results", {})
-        for action in ("interface", "compile", "lint", "eval_quality"):
+        for action in ("interface", "coding_style", "compile", "lint", "eval_quality"):
             result = results.get(action, {})
+            if action == "coding_style" and not result:
+                continue
             if result.get("status") != "PASS":
                 return str(result.get("category") or "SYSTEM_ERROR")
         return "QUALITY_ERROR"
@@ -311,6 +314,22 @@ class StaticCandidateEvaluator:
                 gate_stage="PATH_VALIDATED",
                 reason="interface gate failed",
             )
+
+        if spec_ir.coding_style_constraint == "strict_sv":
+            source = re.sub(
+                r"//[^\n]*|/\*.*?\*/", "", path.read_text(encoding="utf-8"),
+                flags=re.DOTALL,
+            )
+            if re.search(r"\binitial\b", source):
+                results["coding_style"] = {
+                    "status": "FAIL",
+                    "category": "QUALITY_ERROR",
+                    "errors": ["strict_sv forbids initial blocks in DUT"],
+                }
+                return self._report(
+                    candidate_id, results, accepted=False, hard_gates_passed=False,
+                    gate_stage="INTERFACE_PASSED", reason="strict_sv coding style failed",
+                )
 
         try:
             for action in ("lint", "compile", "eval_quality"):

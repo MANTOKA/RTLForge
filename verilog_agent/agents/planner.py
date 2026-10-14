@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 from verilog_agent.agents.validation import (
@@ -17,6 +19,7 @@ from verilog_agent.domain.models import (
     TaskTreeNode,
 )
 from verilog_agent.providers.base import StructuredModelProvider
+from verilog_agent.services.read_only_tools import ReadOnlyReferenceTools
 
 _LEAF_TASK_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -108,9 +111,53 @@ class RealPlanner:
         self.provider = provider
 
     def plan(self, context: RTLTaskContext) -> PlanResult:
+        input_text = context.raw_spec
+        references = context.metadata.get("reference_files")
+        if references and "orchestrator=langgraph" in context.metadata.get(
+            "experiment_tags", []
+        ):
+            tools = ReadOnlyReferenceTools(references)
+            request = self.provider.generate_structured(
+                instructions=(
+                    "Choose at most one read-only reference tool for the RTL requirement. "
+                    "Use none if no document is needed. Only listed files or their parent "
+                    "directories are permitted. Do not request shell or EDA operations."
+                ),
+                input_text=json.dumps(
+                    {"requirement": context.raw_spec, "reference_files": references},
+                    ensure_ascii=False,
+                ),
+                schema_name="planner_reference_tool",
+                schema={
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "tool": {"type": "string", "enum": ["none", "read_file", "list_dir"]},
+                        "path": {"type": "string"},
+                    },
+                    "required": ["tool", "path"],
+                },
+            )
+            tool_name = request.get("tool")
+            if tool_name != "none":
+                if tool_name not in {"read_file", "list_dir"}:
+                    raise AgentOutputError("Planner requested an unauthorized tool")
+                path = str(request.get("path", ""))
+                call = tools.call
+                if os.environ.get("LANGSMITH_TRACING", "").lower() == "true":
+                    from langsmith import traceable
+
+                    call = traceable(run_type="tool", name=tool_name)(call)
+                content = call(tool_name, path)
+                context.metadata.setdefault("read_tool_calls", []).append(
+                    {"tool": tool_name, "path": path, "characters": len(content)}
+                )
+                input_text = json.dumps(
+                    {"requirement": context.raw_spec, "reference_excerpt": content},
+                    ensure_ascii=False,
+                )
         payload = self.provider.generate_structured(
             instructions=PLANNER_INSTRUCTIONS,
-            input_text=context.raw_spec,
+            input_text=input_text,
             schema_name="verilog_requirement_plan",
             schema=PLAN_SCHEMA,
         )
@@ -120,6 +167,13 @@ class RealPlanner:
             result.spec_ir.module_name = require_verilog_identifier(
                 required_module_name, "required_module_name"
             )
+        if "orchestrator=langgraph" in context.metadata.get("experiment_tags", []):
+            result.spec_ir.coding_style_constraint = context.metadata.get(
+                "coding_style_constraint",
+                "legacy_verilog" if context.metadata.get("benchmark_problem_id") else "strict_sv",
+            )
+            if result.spec_ir.coding_style_constraint not in {"legacy_verilog", "strict_sv"}:
+                raise AgentOutputError("unknown coding_style_constraint")
         return result
 
     @staticmethod

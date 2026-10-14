@@ -31,6 +31,17 @@ runs/
 data/benchmarks/*
 !data/benchmarks/README.md
 
+# Local drafts and RS decoder coursework are not part of the public project.
+docs/drafts/
+experiments/local-rs/
+docs/RS272257_*.md
+tests/integration/test_rs_harness.py
+tests/unit/test_rs_reference.py
+tests/unit/test_rs_testbench_agent.py
+verilog_agent/benchmarks/rs_demo.py
+verilog_agent/benchmarks/rs_reference.py
+verilog_agent/benchmarks/rs_synth.tcl
+
 # Logs and editor files
 *.log
 .idea/

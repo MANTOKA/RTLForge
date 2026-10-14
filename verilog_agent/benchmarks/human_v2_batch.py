@@ -59,6 +59,14 @@ def main() -> int:
         help="Independent candidate cap; start with one, regenerate on demand (3 is opt-in)",
     )
     parser.add_argument("--max-repairs", type=int, choices=(0, 1, 2, 3), default=2)
+    parser.add_argument(
+        "--orchestrator", choices=("legacy", "langgraph"), default="legacy",
+        help="Keep the legacy baseline or run the M1 LangGraph entry",
+    )
+    parser.add_argument(
+        "--experiment-pair-id",
+        help="Associate legacy and LangGraph reports without reusing task IDs",
+    )
     parser.add_argument("--model", help="Override VERILOG_AGENT_MODEL for all LLM roles")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--docker-image", default="verilog-agent-sandbox:reflection")
@@ -252,6 +260,7 @@ def _run_case(
         emit=lambda _line: None,
         memory_store=memory_store,
         memory_mode=args.memory_mode,
+        orchestrator_kind=getattr(args, "orchestrator", "legacy"),
     )
     try:
         summary = showcase.run(
@@ -261,6 +270,7 @@ def _run_case(
             task_metadata={
                 "benchmark_problem_id": case.problem_id,
                 "required_module_name": required_module_name,
+                "experiment_pair_id": getattr(args, "experiment_pair_id", None),
             },
         )
     except ShowcaseRunError as error:
@@ -318,6 +328,8 @@ def _result_from_summary(
         "failure_category": failure_category,
         "reason": "" if summary.get("verified_rtl") else _failure_reason(summary, mismatch),
         "task_id": summary.get("task_id"),
+        "orchestrator": summary.get("orchestrator", "legacy"),
+        "generated_tb_pass": summary.get("generated_tb_pass"),
         "model_calls": summary.get("model_calls", []),
         "token_usage": summary.get("token_usage", summarize_calls(summary.get("model_calls", []))),
         "selected_candidate_id": summary.get("selected_candidate_id"),
@@ -395,6 +407,8 @@ def _initial_report(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "configuration": {
             "model": settings.model,
+            "orchestrator": getattr(args, "orchestrator", "legacy"),
+            "experiment_pair_id": getattr(args, "experiment_pair_id", None),
             "base_url": settings.base_url,
             "candidate_count": args.candidates,
             "candidate_policy": "sequential_repair_first_v1",
@@ -423,6 +437,8 @@ def _validate_resume(
 ) -> None:
     configuration = report.get("configuration", {})
     expected = {
+        "orchestrator": getattr(args, "orchestrator", "legacy"),
+        "experiment_pair_id": getattr(args, "experiment_pair_id", None),
         "sampling": settings.sampling_configuration(),
         "prompt_version": prompt_source_version(),
         "model": settings.model,
@@ -435,7 +451,10 @@ def _validate_resume(
         "memory_mode": args.memory_mode,
         "memory_database": str(args.memory_database),
     }
-    mismatched = [key for key, value in expected.items() if configuration.get(key) != value]
+    mismatched = [
+        key for key, value in expected.items()
+        if configuration.get(key, "legacy" if key == "orchestrator" else None) != value
+    ]
     if mismatched:
         raise ValueError(f"cannot resume with changed settings: {', '.join(mismatched)}")
 
@@ -521,6 +540,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         "# VerilogEval-Human-v2 Evaluation Report",
         "",
         f"- Model: `{config['model']}`",
+        f"- Orchestrator: `{config.get('orchestrator', 'legacy')}`",
         sampling_markdown(config.get("sampling", {})),
         f"- Prompt source version: `{config.get('prompt_version', 'UNKNOWN')}`",
         f"- Protocol: `{report['protocol']}`",
@@ -581,7 +601,8 @@ def _default_output(args: argparse.Namespace, settings: ProviderSettings) -> Pat
     if args.rerun_failures_from:
         source = args.rerun_failures_from
         return source.with_name(f"{source.stem}_repairable_retry.json")
-    return args.runs_root.parent / "reports" / "human_v2_batch.json"
+    suffix = "_langgraph" if getattr(args, "orchestrator", "legacy") == "langgraph" else ""
+    return args.runs_root.parent / "reports" / f"human_v2_batch{suffix}.json"
 
 
 def _safe_name(value: str) -> str:

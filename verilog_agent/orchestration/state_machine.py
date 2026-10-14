@@ -39,6 +39,7 @@ ALLOWED_TRANSITIONS: dict[TaskStage, frozenset[TaskStage]] = {
         {
             TaskStage.COMPLETED,
             TaskStage.CLASSIFYING,
+            TaskStage.WAITING_FOR_USER,
             TaskStage.CANCELLED,
             TaskStage.FAILED,
         }

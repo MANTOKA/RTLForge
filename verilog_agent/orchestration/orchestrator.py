@@ -176,6 +176,8 @@ class Orchestrator:
                     limit=3,
                 )
             )
+        for call in context.metadata.get("read_tool_calls", []):
+            self._record(context, EventType.READ_TOOL_CALLED, call)
         self._record(
             context,
             EventType.PLAN_DONE,

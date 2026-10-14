@@ -2,7 +2,7 @@
 
 ## 已实现的历史经验 Memory
 
-[SQLiteMemoryStore](../verilog_agent/memory/store.py) 存储经验证的设计模式、错误观察和修复策略，使用 FTS5/BM25 检索，记录来源与验证证据。Orchestrator 现有 `off`、`read_only`、`read_write` 模式。离线 [Consolidation](../verilog_agent/memory/consolidate.py) 已有入口；完整五类记忆、异步调度和正式收益证明仍待完成。具体门禁与案例见[实现记录](MEMORY_IMPLEMENTATION_ZH.md)。
+[SQLiteMemoryStore](../verilog_agent/memory/store.py) 存储经验证的设计模式、错误观察和修复策略，使用 FTS5/BM25 检索，记录来源与验证证据。Orchestrator 现有 `off`、`read_only`、`read_write` 模式。离线 [Consolidation](../verilog_agent/memory/consolidate.py) 已有入口；完整五类记忆、异步调度和正式收益证明仍待完成。具体门禁与案例见[实现记录](reference/MEMORY_IMPLEMENTATION_ZH.md)。
 
 ## M2 才启用的外部文档 RAG
 

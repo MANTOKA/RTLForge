@@ -44,6 +44,7 @@ class SpecIR:
     assumptions: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
     version: int = 1
+    coding_style_constraint: str = "legacy_verilog"
     schema_version: int = DOMAIN_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -52,6 +53,8 @@ class SpecIR:
         port_names = [port.name for port in self.ports]
         if len(port_names) != len(set(port_names)):
             raise ValueError("port names must be unique")
+        if self.coding_style_constraint not in {"strict_sv", "legacy_verilog"}:
+            raise ValueError("unknown coding_style_constraint")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -69,6 +72,7 @@ class SpecIR:
             assumptions=list(data.get("assumptions", [])),
             acceptance_criteria=list(data.get("acceptance_criteria", [])),
             version=data.get("version", 1),
+            coding_style_constraint=data.get("coding_style_constraint", "legacy_verilog"),
             schema_version=data.get("schema_version", DOMAIN_SCHEMA_VERSION),
         )
 

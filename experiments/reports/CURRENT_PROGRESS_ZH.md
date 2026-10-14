@@ -76,7 +76,7 @@ Memory MVP 的写入、检索、反馈和隔离链路可运行；**不证明** M
 
 2026-09-08 对加入 Prob104 新闭环后的 172 个现存任务摘要执行确定性离线 consolidation，形成 153 条
 去重后的 verified design pattern、13 类 error pattern 和 8 条 repair strategy（其中 4 条 ACTIVE）；完整门控和边界见
-[`MEMORY_IMPLEMENTATION_ZH.md`](MEMORY_IMPLEMENTATION_ZH.md)。
+[`MEMORY_IMPLEMENTATION_ZH.md`](../../docs/reference/MEMORY_IMPLEMENTATION_ZH.md)。
 
 完整证据和失败原因在
 [`HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`](HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md)。
