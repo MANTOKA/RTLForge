@@ -2,7 +2,7 @@
 
 VerilogAgent 将硬件需求整理为规格，生成 Verilog/SystemVerilog RTL，并在受限 Docker 容器中调用 Icarus Verilog、Verilator 和 Yosys 检查候选实现。验证失败后，系统按错误类型触发受预算约束的修复。项目保留静态评分和验证证据驱动的 Memory，目标是提高 RTL 生成的正确率与可追溯性。
 
-> 当前状态：旧 Orchestrator 继续提供基线；M1 新增 LangGraph 入口、前置独立 Testbench Agent、显式授权的只读参考文件工具和可选 LangSmith 追踪。新入口已通过离线回归，但尚未完成 Human v2 成对重测。外部文档 RAG、VCD 摘要和 Yosys 综合门禁仍属 M2。
+> 当前状态：旧 Orchestrator 继续提供基线；M1 新增 LangGraph 入口、前置独立 Testbench Agent、显式授权的只读参考文件工具和可选 LangSmith 追踪。新入口已通过离线回归和 Human v2 单题真实模型烟测，但尚未完成全量成对重测。外部文档 RAG、VCD 摘要和 Yosys 综合门禁仍属 M2。
 
 ## 快速导航
 
