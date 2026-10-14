@@ -1,7 +1,8 @@
-# 历史实验记录
+# 实验记录
 
-这些是当时运行的快照，不等于 M1 新入口的指标。
+以下报告各有自己的测试范围；历史快照和单题烟测都不等于 M1 新入口的全量指标。
 
+- [M1 Human v2 单题真实模型烟测](M1_HUMAN_V2_SMOKE_20261015.md)：新旧入口主路径连通性，不代表全量指标。
 - [当时的项目进展](CURRENT_PROGRESS_ZH.md)
 - [Human v2 开发基线](HUMAN_V2_DEV_BASELINE_ZH.md)与[双轮运行报告](HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md)
 - [RTLLM 50 题报告](RTLLM_2_1_GPT_5_6_TERRA_50_CASE_REPORT_ZH.md)

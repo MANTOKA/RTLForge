@@ -15,4 +15,6 @@
 
 M1 待完成的消融：前置 TB、Memory 开关、候选/修复预算，以及评分 × Memory。M2 再逐项检查文档 RAG、VCD 摘要、Yosys 门禁。当前只实现编排切换及逐任务结果记录，不把尚未完成的消融写成实验结论。设计背景见[项目规格书](reference/VERILOG_AGENT_PROJECT_SPEC_V2_ZH.md)。
 
+[M1 单题真实模型烟测](../experiments/reports/M1_HUMAN_V2_SMOKE_20261015.md)中，新旧入口各在 `Prob001_zero` 上通过隐藏 golden；这只证明主路径可运行，不是全量通过率或编排层消融。
+
 Human v2 的 specification-only 与 oracle-assisted closed loop 是不同协议；使用 hidden golden TB 反馈循环的结果必须如实标注，不能写成普通 Pass@1。基准和 Memory 的数据隔离见[数据策略](reference/BENCHMARK_AND_MEMORY_DATA_POLICY_ZH.md)。
