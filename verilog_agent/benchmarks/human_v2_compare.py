@@ -65,8 +65,11 @@ def _validate_compatible(report_a: dict[str, Any], report_b: dict[str, Any]) -> 
     config_a = report_a["configuration"]
     config_b = report_b["configuration"]
     controlled_fields = (
+        "sampling",
+        "prompt_version",
         "base_url",
         "candidate_count",
+        "candidate_policy",
         "max_repairs",
         "docker_image",
         "memory_mode",

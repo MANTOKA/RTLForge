@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 from uuid import uuid4
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class MemoryType(str, Enum):
+    DESIGN_PATTERN = "DESIGN_PATTERN"
+    ERROR_PATTERN = "ERROR_PATTERN"
+    REPAIR_STRATEGY = "REPAIR_STRATEGY"
+    PROJECT = "PROJECT"
+    HUMAN_INTERVENTION = "HUMAN_INTERVENTION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +61,9 @@ class MemoryItem:
     verification_gate_reached: str
     toolchain_version: str
     evidence_hashes: list[str]
+    source_problem_ids: list[str] = field(default_factory=list)
+    source_task_ids: list[str] = field(default_factory=list)
+    support_count: int = 1
     confidence: float = 0.7
     positive_uses: int = 0
     negative_uses: int = 0

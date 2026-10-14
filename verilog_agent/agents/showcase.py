@@ -13,6 +13,7 @@ from verilog_agent.memory import SQLiteMemoryStore
 from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
 from verilog_agent.orchestration.interfaces import Debugger
 from verilog_agent.providers import StructuredModelProvider
+from verilog_agent.providers.usage import prompt_source_version, sampling_markdown, summarize_calls
 from verilog_agent.services import (
     GoldenTestbenchVerificationService,
     StaticCandidateEvaluator,
@@ -20,7 +21,10 @@ from verilog_agent.services import (
 
 
 class ShowcaseRunError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, task_id: str | None = None, calls=None) -> None:
+        super().__init__(message)
+        self.task_id = task_id
+        self.model_calls = list(calls or [])
 
 
 class _StopAfterGeneration:
@@ -71,6 +75,7 @@ class PlannerGeneratorShowcase:
         candidate_count: int = 2,
         max_repairs: int = 0,
         task_metadata: dict | None = None,
+        task_id: str | None = None,
     ) -> dict:
         store = SQLiteTaskStore(self.database)
         stop_after_generation = _StopAfterGeneration()
@@ -90,13 +95,19 @@ class PlannerGeneratorShowcase:
             raw_spec,
             budget=Budget(max_candidates=candidate_count, max_repairs=max_repairs),
             metadata=task_metadata,
+            task_id=task_id,
         )
         task_root = self.runs_root / context.task_id
         task_root.mkdir(parents=True, exist_ok=True)
+        context.metadata["model_calls_path"] = str(task_root / "model_calls.jsonl")
         (task_root / "input.txt").write_text(raw_spec + "\n", encoding="utf-8", newline="\n")
 
         self._heading("VerilogAgent Planner / Generator 可观察演示")
         self.emit(f"Provider: {self.provider_label}")
+        settings = getattr(self.provider, "settings", None)
+        sampling = (settings.sampling_configuration()
+                    if hasattr(settings, "sampling_configuration") else {})
+        self.emit(sampling_markdown(sampling))
         self.emit(f"Task ID: {context.task_id}")
         if self.evaluator is None:
             self.emit("verified_rtl: false（此演示有意停在候选生成后）")
@@ -127,7 +138,7 @@ class PlannerGeneratorShowcase:
         orchestrator.advance_task(context.task_id)
         self._expect_stage(context, TaskStage.GENERATING, store, "进入 Generator")
 
-        self._heading(f"阶段 2：Generator 正在生成 {candidate_count} 个差异候选")
+        self._heading(f"阶段 2：Generator 先生成 1 个候选，独立候选总上限 {candidate_count}")
         started = perf_counter()
         orchestrator.advance_task(context.task_id)
         generator_ms = round((perf_counter() - started) * 1000)
@@ -144,6 +155,8 @@ class PlannerGeneratorShowcase:
             self._heading("阶段 3：Candidate Evaluation 正在执行 Docker 静态门禁")
             started = perf_counter()
             orchestrator.advance_task(context.task_id)
+            while context.current_stage in {TaskStage.GENERATING, TaskStage.EVALUATING}:
+                orchestrator.advance_task(context.task_id)
             evaluator_ms = round((perf_counter() - started) * 1000)
             if context.current_stage not in {TaskStage.VERIFYING, TaskStage.CLASSIFYING}:
                 self._expect_stage(context, TaskStage.VERIFYING, store, "Candidate Evaluation")
@@ -208,6 +221,8 @@ class PlannerGeneratorShowcase:
                 verification = json.loads(Path(report_path).read_text(encoding="utf-8"))
                 self._render_verification(verification)
 
+        if self.evaluator is not None and context.selected_candidate_id is not None:
+            static_evaluation = dict(context.candidate().metadata.get("static_evaluation", {}))
         events = store.list_events(context.task_id)
         self._heading("阶段 6：Orchestrator 事件轨迹")
         for event in events:
@@ -218,6 +233,10 @@ class PlannerGeneratorShowcase:
 
         summary = {
             "provider": self.provider_label,
+            "sampling": sampling,
+            "prompt_version": prompt_source_version(),
+            "model_calls": context.metadata.get("model_calls", []),
+            "token_usage": summarize_calls(context.metadata.get("model_calls", [])),
             "task_id": context.task_id,
             "input": raw_spec,
             "current_stage": context.current_stage.value,
@@ -235,6 +254,9 @@ class PlannerGeneratorShowcase:
             "task_tree": context.task_tree_root.to_dict(),
             "candidates": [candidate.to_dict() for candidate in context.candidates],
             "selected_candidate_id": context.selected_candidate_id,
+            "candidate_policy": context.metadata.get("candidate_policy"),
+            "candidate_regenerations": context.metadata.get("candidate_regenerations", []),
+            "budget": context.budget.to_dict(),
             "selected_static_evaluation": static_evaluation,
             "verification": verification,
             "repair_attempts": context.metadata.get("repair_attempts", []),
@@ -256,7 +278,11 @@ class PlannerGeneratorShowcase:
         self.emit(f"完整摘要: {summary_path.as_posix()}")
         if self.evaluator is None:
             self.emit("下一步尚未执行：候选评分、EDA 验证和 Debugger 修复。")
-        elif self.verifier is not None and context.current_stage is TaskStage.COMPLETED:
+        elif (
+            self.verifier is not None
+            and context.current_stage is TaskStage.COMPLETED
+            and not context.metadata.get("repair_attempts")
+        ):
             self.emit("本次候选已通过指定 golden testbench；未触发 Debugger。")
         elif self.verifier is not None and self.debugger is None:
             self.emit("下一步尚未执行：按结构化失败类别调用真实 Debugger。")
@@ -362,7 +388,9 @@ class PlannerGeneratorShowcase:
                 reason = str(event.payload.get("reason", reason))
                 break
         raise ShowcaseRunError(
-            f"{phase} failed at {context.current_stage.value}: {reason}"
+            f"{phase} failed at {context.current_stage.value}: {reason}",
+            task_id=context.task_id,
+            calls=context.metadata.get("model_calls", []),
         )
 
     def _render_items(self, items: list[str]) -> None:

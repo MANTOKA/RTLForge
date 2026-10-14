@@ -27,6 +27,10 @@ obj_dir/
 work/
 runs/
 
+# External benchmark corpora are downloaded locally and never committed.
+data/benchmarks/*
+!data/benchmarks/README.md
+
 # Logs and editor files
 *.log
 .idea/

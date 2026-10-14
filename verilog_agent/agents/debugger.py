@@ -20,7 +20,9 @@ Do not create or modify a testbench, oracle, reference implementation, specifica
 You cannot see hidden tests: reason only from the specification, current RTL, reflection policy,
 and sanitized diagnostics. Explain the change, expected impact, and remaining risks.
 If prior repair analysis reports no progress, do not repeat an equivalent edit. Change the
-root-cause hypothesis and explain why the new patch should reduce the observed mismatch."""
+root-cause hypothesis and explain why the new patch should reduce the observed mismatch.
+For an isolated single-sample mismatch, inspect initialization, reset assumptions, and
+first-cycle/nonblocking timing before rewriting steady-state datapath logic."""
 
 
 class RealDebugger:
@@ -61,7 +63,7 @@ class RealDebugger:
                 "prior_repair_attempts": context.metadata.get("repair_attempts", [])[-3:],
                 "last_repair_analysis": context.metadata.get("last_repair_analysis"),
                 "candidate_fallback": context.metadata.get("repair_fallback"),
-                "retrieved_verified_repair_memories": context.metadata.get(
+                "retrieved_memories": context.metadata.get(
                     "retrieved_memories", []
                 ),
                 "remaining_repair_attempts": (
@@ -79,7 +81,9 @@ class RealDebugger:
         )
         patched_rtl = self._validate_rtl(payload.get("patched_rtl"), context.spec_ir.module_name)
         if patched_rtl == source_rtl:
-            raise AgentOutputError("Debugger returned an unchanged candidate")
+            from verilog_agent.agents.validation import RepairNoProgressError
+
+            raise RepairNoProgressError("Debugger returned an unchanged candidate")
 
         repair_number = context.budget.repair_attempts
         candidate_id = f"cand_repair_{repair_number:02d}"

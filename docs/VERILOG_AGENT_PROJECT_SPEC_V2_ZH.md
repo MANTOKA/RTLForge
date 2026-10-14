@@ -2,11 +2,11 @@
 
 ## 完整项目计划书 / 需求规格说明书（来源溯源与进度校正版）
 
-> 版本：v2.4（来源溯源、原创边界与当前进度版）
+> 版本：v2.5（证据驱动 Memory 进展版）
 >
 > 初版日期：2026-08-19
 >
-> 本次更新：2026-09-07
+> 本次更新：2026-09-08
 > 权威依据：用户提供的 Gemini 公开分享页“Verilog Agent System Design”完整 36 页内容  
 > 项目仓库：`D:\AI\VerilogMulti\VerilogAgent`  
 > 说明：本文档不使用工作区内 `verilog_agent_main_program.pdf` 的内容。
@@ -38,14 +38,14 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 ### 1.4 成功标准
 
 - 系统可以通过 Docker Compose 启动，并在浏览器完成全流程。
-- 固定需求下生成 2-3 个候选，并输出可解释的质量分数和选择理由。
+- 固定需求下先生成 1 个候选，默认按需最多 2 个，第三个仅手动实验开放；输出质量分数与再生成理由。
 - lint、compile、simulate、quality evaluation、benchmark 均返回统一 JSON。
 - 修复策略能按语法、功能、需求/架构问题分类路由。
 - 任务成功或终止后，后台记忆整理不阻塞前台任务。
 - 每次运行可追溯到模型配置、工具版本、评分配置和 Git commit。
 - 在固定 benchmark 上证明评分和记忆对通过率、迭代次数或成本具有正收益。
 
-### 1.5 当前实施状态（2026-09-07）
+### 1.5 当前实施状态（2026-09-08）
 
 本项目已经从方案阶段进入可运行原型阶段。下表以当前 Git 分支和测试结果为准，避免把计划功能误写成已完成功能。
 
@@ -61,12 +61,12 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 | Candidate Evaluation Service | 已完成第一版 | 已接入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据、排序和验证失败后的候选回退；`TOOL_INCOMPATIBILITY` 不再误拒绝可由 Icarus 验证的 RTL |
 | Verification Service | 已完成第一版 | 支持 golden testbench、按评分顺序回退、证据报告和受控反馈；非零输出 mismatch 即使 aggregate 为零也不会误判 PASS |
 | Debugger Agent 与 Reflection Router | 已完成第一版 | 支持 Syntax/Functional/Timeout/Requirement/Infrastructure 确定性路由、新 child candidate、可审计 diff、重评分、复验、回滚和修复预算 |
-| Memory MVP | 已完成可调用最小闭环 | `RepairAttempt`、SQLite `MemoryItem`、FTS5/BM25 检索、`off/read_only/read_write`、同题隔离、成功写入门控和负迁移 `QUARANTINED` 已实现；不是完整五类 Memory 或异步 Consolidation |
-| Consolidation Worker 与五类 Memory | 待完成 | 尚无异步队列、五类完整 schema、跨任务重复正迁移提升或受控 A/B 证据 |
+| 证据驱动 Memory | 三类已实现 | `DESIGN_PATTERN`、`ERROR_PATTERN`、`REPAIR_STRATEGY` 已接入在线门控与角色检索；支持同题隔离、support count、负迁移 `QUARANTINED` 和粗粒度策略 `SUPERSEDED` |
+| Consolidation Worker 与完整五类 Memory | 部分完成 | 已有可重复运行的确定性离线 consolidation；`PROJECT`、`HUMAN_INTERVENTION` 专用 schema、异步队列、语义聚类和受控 A/B 尚未完成 |
 | API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
 | VerilogEval-Human v2 工程评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；首轮全量模型基线 145/154，定向复测回填为 152/154；尚无冻结元数据下的独立复现实验或消融 |
 
-2026-09-07 当前工作区快速回归为 `103 passed, 12 skipped`。12 项 skipped 是默认不执行的 Docker 集成测试；本次状态核验终端未发现 Docker CLI，因此不能把历史镜像运行结果写成当前复验通过。Human v2 的首次顺序全量运行得到 145/154 = 94.16%，随后仅对首轮 9 个失败题定向复测得到 7/9，并回填为 152/154 = 98.70%；这不是第二次全量 156 题实验，也不能归因给 Memory、Router 或评分中的任何单一机制。完整实验边界见 `HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`。
+2026-09-08 当前工作区快速回归为 `122 passed, 13 skipped`，默认跳过的 13 项 Docker 集成测试另行显式执行为 `13 passed`。Prob104 的官方参考与修复后 Agent RTL 均在 golden testbench 上通过，Agent 经三轮 Debugger 从 `1/199` 收敛到 `0/199`。对 172 个已有任务摘要执行离线 consolidation 后，数据库包含 153 条去重 verified design pattern、13 类 error pattern 和 8 条 repair strategy（4 条 ACTIVE）。RTLLM 2.1 的 50 题适配器、单题 Demo 和可恢复逐题批量入口也已实现；官方参考预检为 47 PASS、3 项 Icarus/testbench 工具不兼容，并完成 1 个单题与 1 个批量烟雾测试，尚未执行完整模型评测。这些数字证明数据管线和单题检索闭环工作，不证明 Memory 提升总体通过率。Human v2 的首次顺序全量运行仍为 145/154 = 94.16%，定向复测回填仍为 152/154 = 98.70%；完整边界见 `HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`、`MEMORY_IMPLEMENTATION_ZH.md` 与 `RTLLM_EVALUATION_ZH.md`。
 
 ### 1.6 来源与原创标记规范
 
@@ -164,7 +164,7 @@ flowchart TD
 - Agent 数量固定为三个，不允许运行时无限派生。
 - 网页方案中的 Candidate Evaluation Agent 和 Verification Agent 降级为普通服务，因为它们的核心工作是规则计算、工具调用和状态判定，不需要独立人格或 LLM 对话。
 - Agent 不直接互相调用，只能读写受控的 `RTLTaskContext` 并发送事件。
-- 默认候选数为 2，研究模式最多 3；修复默认最多 3 轮。
+- 初始候选数为 1，默认独立候选总上限为 2，手动研究模式最多 3；修复默认最多 3 轮，整题累计。
 - 使用 SQLite/FTS5 起步，不在 MVP 引入独立向量数据库。
 - 先对全部候选执行接口检查、静态评分和快速 lint，再按排序依次进入成本较高的编译、仿真和综合阶段；排名第一的候选失败时，在预算内回退验证下一候选，不能仅凭静态分永久淘汰其余候选。
 - Memory Consolidation 作为异步 Worker 执行，不调用 LLM 也能完成基础去重、统计和降权；只有需要把多条成功经验泛化成自然语言策略时才可选调用一次模型。
@@ -208,7 +208,7 @@ flowchart TD
 
 ### 4.2 RTL Generation Agent
 
-职责：依据 Task Tree 和 Design Pattern Memory 并行生成 2-3 个完整候选。多候选探索直接借鉴 MAGE 的 candidate sampling；默认只生成 2 个、最多 3 个以及“受控结构差异”是本项目为降低成本作出的改造。[MAGE][ORIG-ARCH][IMPL]
+职责：依据 Task Tree 和 Design Pattern Memory 逐个生成独立候选。先生成 1 个，硬门禁失败或静态分 <75 时按需生成新候选；静态合格后先验证，功能失败优先 Debugger 修复，无进展或修复预算耗尽才重新生成。默认独立候选总上限 2，第三个仅手动指定开放，PASS 立即结束。修复预算整题累计，不随再生成重置。槽耗尽且静态仍不合格时，使用剩余修复预算处理静态问题。多候选探索动机借鉴 MAGE，顺序触发和低预算策略为本项目设计，节省 token 的幅度仍需实际评测。[MAGE][ORIG-ARCH][IMPL]
 
 候选应体现受控差异，例如：
 
@@ -307,7 +307,7 @@ Requirement Reflection 不等于擅自放宽需求。若需要改变用户约束
 
 ### 6.1 设计目的
 
-评分用于在仿真前比较 2-3 个候选，并为修复提供连续的进步信号。它不是功能正确性的替代品，也不能让高静态分候选绕过验证。
+评分用于仿真前判定当前候选是否需要重新生成，并为修复提供连续的进步信号；独立候选按需逐个产生。它不是功能正确性的替代品，也不能让高静态分候选绕过验证。
 
 ### 6.2 两级评分机制
 
@@ -545,7 +545,7 @@ benchmark     -> Yosys 快速综合与资源统计
 
 ### 10.2 多候选生成
 
-- FR-010：每次生成 2-3 个可区分候选。
+- FR-010：每次生成 1 个独立候选，默认总上限 2；第三个仅显式实验开放。
 - FR-011：保存候选 ID、父版本、提示版本、模型参数和代码哈希。
 - FR-012：候选必须遵循已确认的接口契约。
 
@@ -783,7 +783,7 @@ v1.0.0
 
 - 实现 OpenAI-compatible Provider。
 - Planner 输出 schema 校验的 SpecIR/Task Tree。
-- Generator 生成 2-3 个差异候选并去重。
+- Generator 按静态失败/低分或修复无进展/预算耗尽逐个生成候选，并跨次去重；默认最多 2 个。
 
 第 6 周：Candidate Evaluation 与评分创新
 
@@ -801,11 +801,11 @@ v1.0.0
 
 ### Phase 3：Memory 与收敛评测（第 8-9 周）
 
-第 8 周：任务内记忆和五类存储（**已完成 MVP，完整目标进行中**）
+第 8 周：任务内记忆和五类存储（**三类证据库已完成，完整目标进行中**）
 
 - 已实现 SQLite `RepairAttempt`、`MemoryItem`、候选谱系和验证证据摘要。
-- 已实现 FTS5/BM25 检索、`off/read_only/read_write`、同题隔离、成功修复写入门控和负迁移 quarantine。
-- 尚未实现五类完整 Memory 数据结构、用户管理和跨任务重复正迁移提升。
+- 已实现 Design/Error/Repair 三类写入门控、FTS5/BM25 角色检索、`off/read_only/read_write`、同题隔离、跨题 support count、负迁移 quarantine 和粗粒度策略 supersede。
+- 已实现扫描既有任务摘要的确定性离线 consolidation；Project/Human Intervention 专用 schema 与异步调度尚未实现。
 
 第 9 周：Memory Consolidation（**待完成**）
 
@@ -1376,7 +1376,7 @@ Interaction effect  = (D - C) - (B - A)
 
 1. **加强 SpecIR**：明确端口、位宽、signedness、复位、周期延迟、优先级和边界条件。
 2. **接口门禁前置**：生成后立即做模块名、端口和位宽检查，减少无效仿真。
-3. **提高候选差异性**：要求结构差异而非只改变变量名；默认 2 个，复杂任务按预算升至 3 个。
+3. **提高候选差异性**：要求结构差异而非只改变变量名；初始 1 个，按需最多 2 个，第三个仅手动实验开放。
 4. **真实 Verification**：先建立可靠 oracle 和 failure taxonomy，再实现 Debugger。
 5. **类别化 Debugger**：从 syntax/interface 开始，再扩展 reset/latency/FSM/handshake。
 6. **Counterexample 最小化**：只提供首个失败周期、相关信号和期望/实际值，降低上下文噪声。
@@ -1443,7 +1443,7 @@ Human v2 不应用作反复调 prompt 的唯一开发集。应划分开发子集
 |---|---|---|---|
 | Planner 的任务分解 | VerilogCoder 的 task planning、sub-task dependency、TCRG retrieval [VC] | 删除 TCRG，改用 JSON `SpecIR + TaskTree`、schema 校验与假设记录 | 改造借鉴；轻量树及数据契约为 `[ORIG-ARCH]` |
 | Planner/Generator/Debugger 分工 | VerilogCoder 的 code/debug agent 分工；MAGE 的多角色生成/验证/修复 [VC][MAGE] | 固定为 3 个 LLM Agent，Evaluator/Verifier 程序化 | `[ORIG-ARCH]`，工程价值需用延迟/成本对比证明 |
-| 2-3 个候选 | MAGE 的高温候选采样、最多 20 个候选和 mismatch 排序 [MAGE] | 默认 2、最多 3；先静态评分再逐个仿真 | 采样动机来自 MAGE；预算和排序管线为 `[ORIG-SCORE]` |
+| 顺序候选生成 | MAGE 的候选采样和 mismatch 排序 [MAGE] | 初始 1、默认最多 2，第三个手动开放；静态失败/低分或修复无进展/耗尽触发新候选 | 采样动机来自 MAGE；预算和触发管线为 `[ORIG-SCORE]` |
 | Icarus + golden testbench | VerilogEval、VerilogCoder、MAGE [VE2][VC][MAGE] | Docker 封装、统一 JSON、隔离工作区 | 工具链借鉴；封装为 `[ENG][IMPL]` |
 | Verilator lint | Verilator 官方诊断体系 [VERILATOR] | 将诊断转换成 ScoreCard 和门禁 | 工具语义有来源；量化方法为 `[ORIG-SCORE]` |
 | Yosys benchmark | Yosys 通用开源综合工具 | 只报告结构/资源统计，不宣称真实 PPA | `[ENG]`；不是 VerilogCoder/MAGE 创新 |
@@ -1493,7 +1493,7 @@ Human v2 不应用作反复调 prompt 的唯一开发集。应划分开发子集
 | E4 | 本项目新假设，尚无实验 | 写“拟创新/待验证” |
 | E5 | 本仓库测试或正式消融产生的证据 | 实验完成后才能写“本项目结果表明” |
 
-当前两个核心创新主要处于 E4；Candidate Evaluation、Verification、Debugger 和 Memory MVP 已具有部分 E5 工程测试证据（包括一次 Human v2 全量基线与定向复测），但没有固定配置下的全量复现或 Scoring x Memory 对照消融，不能升级为“有效性已证明”。
+当前两个核心创新主要处于 E4；Candidate Evaluation、Verification、Debugger 和三类证据驱动 Memory 已具有部分 E5 工程测试证据（包括一次 Human v2 全量基线、定向复测和离线 consolidation），但没有固定配置下的全量复现或 Scoring x Memory 对照消融，不能升级为“有效性已证明”。
 
 ---
 
@@ -1591,7 +1591,7 @@ https://arxiv.org/abs/2310.08560
 | 本项目 golden-testbench 验证 | `verilog_agent/services/verification.py:38`，`GoldenTestbenchVerificationService` | `[ENG][IMPL]` 当前实现入口 |
 | 本项目 Debugger | `verilog_agent/agents/debugger.py:24`，`RealDebugger` | 改造借鉴机制的当前实现入口 |
 | 本项目 Router | `verilog_agent/services/reflection_router.py:41`，`AdaptiveReflectionRouter` | `[ORIG-ROUTER][IMPL]` 当前实现入口 |
-| 本项目 Memory MVP | `verilog_agent/memory/models.py` 与 `store.py`，`SQLiteMemoryStore` | `[ORIG-MEM][IMPL]`：RepairAttempt/MemoryItem、检索、写入门控和 quarantine 已可调用；五类 Memory、异步 Consolidation 与独立增益仍待完成 |
+| 本项目证据驱动 Memory | `verilog_agent/memory/models.py`、`store.py` 与 `consolidate.py` | `[ORIG-MEM][IMPL]`：Design/Error/Repair 三类、角色检索、写入门控、quarantine/supersede 和离线整理已可调用；Project/Human、异步 Consolidation 与独立增益仍待完成 |
 
 工作区中的 `MAGE-main` 与 `VerilogCoder-main` 均为不含 `.git` 元数据的源码快照，当前无法从本地文件证明准确 commit SHA。正式论文复现、发布或答辩归档前，必须从官方仓库固定 tag/commit，记录 SHA、获取日期和许可证；在此之前，只能表述为“基于本地源码快照核验”，不能表述为“基于某一精确提交复现”。
 

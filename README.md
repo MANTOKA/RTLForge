@@ -1,176 +1,82 @@
-# VerilogAgent
+# VerilogAgent：面向 RTL 生成与验证的多 Agent 系统
 
-VerilogAgent is an experimental multi-agent system for generating, checking, simulating, and repairing Verilog/SystemVerilog RTL.
+VerilogAgent 将硬件需求整理为规格，生成 Verilog/SystemVerilog RTL，并在受限 Docker 容器中调用 Icarus Verilog、Verilator 和 Yosys 检查候选实现。验证失败后，系统按错误类型触发受预算约束的修复。项目保留静态评分和验证证据驱动的 Memory，目标是提高 RTL 生成的正确率与可追溯性。
 
-## Current status
+> 当前状态：旧 Orchestrator 的 Planner → Generator → 静态评估 → golden-testbench Verification → Router → Debugger 闭环可运行。独立 Testbench Agent 目前用于 RS 实验；LangGraph 主入口、通用工具调用、LangSmith 追踪和外部文档 RAG 尚未接入主流程。本页按实际代码与后续里程碑区分状态。
 
-The repository currently contains a restricted EDA sandbox and a first end-to-end RTL
-generation/verification/repair prototype:
+## 快速导航
 
-- Ubuntu 22.04 Docker image
-- Icarus Verilog compilation and simulation
-- Verilator linting
-- Yosys synthesis statistics
-- structured JSON diagnostics in `tool_wrapper.py`
-- non-root execution, disabled network, read-only root filesystem, resource limits, input
-  path validation, subprocess timeouts, and isolated temporary outputs
-- Human v2-derived regression RTL and testbench fixtures
+| 想了解 | 文档 |
+|---|---|
+| 目标与当前边界 | [01 项目概览](docs/01-overview.md) |
+| 安装、离线演示与测试 | [02 快速开始](docs/02-getting-started.md) |
+| 旧入口与目标 LangGraph 架构 | [03 架构](docs/03-architecture.md) |
+| Agent、工具权限和 Docker EDA | [04 Agent 与工具](docs/04-agents-and-tools.md) |
+| 历史 Memory 与外部文档 RAG | [05 Memory 与 RAG](docs/05-memory-and-rag.md) |
+| Human v2、对照与消融口径 | [06 评测](docs/06-evaluation.md) |
+| M1/M2/M3 实施顺序 | [07 路线图](docs/07-roadmap.md) |
+| 全部主题和历史报告 | [文档总目录](docs/README.md) |
 
-The hand-written RTL files under `tests/fixtures/` are stable regression inputs. They are
-not intended to represent Agent output. Benchmark artifacts are grouped under
-`runs/<dataset>/<model>/`; Human v2 task artifacts therefore belong under
-`runs/human-v2/<model>/tasks/<task_id>/`. The entire `runs/` tree is excluded from Git.
+## 当前执行路径
 
-The Phase 2 implementation now includes versioned domain models, an explicit task state
-machine, SQLite events/checkpoints, budgets, cancellation, deterministic Fake Agents, and
-real model-backed Planner and Generator implementations. The real agents use an
-OpenAI-compatible Responses endpoint with strict structured output. Deterministic candidate
-evaluation, golden-testbench verification, the deterministic Adaptive Reflection Router, and
-the first real Debugger repair path are implemented; the browser UI is a later slice. See
-[`docs/PHASE2_ORCHESTRATION.md`](docs/PHASE2_ORCHESTRATION.md) and
-[`docs/REAL_AGENTS.md`](docs/REAL_AGENTS.md). A step-by-step Chinese demonstration guide is
-available in [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
-The Human v2 full-baseline, targeted-rerun, Memory-MVP and single-case evidence are recorded in
-[`docs/HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`](docs/HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md).
-The live single-case workflow, resumable 156-case evaluation, and model-comparison
-commands are documented in
-[`docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md`](docs/HUMAN_V2_SINGLE_AND_BATCH_ZH.md).
-The Chinese project-status snapshot, including completed work, open boundaries and the next
-order, is [`docs/CURRENT_PROGRESS_ZH.md`](docs/CURRENT_PROGRESS_ZH.md).
-
-Run the classroom demonstrations separately in PowerShell:
-
-```powershell
-# Correct Agent result: Planner -> Generator -> Docker Verification PASS
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --scenario correct
-
-# Two official-reference Icarus incompatibilities -> infrastructure route
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --scenario icarus
-
-# Two natural Agent failures -> Router -> recorded Debugger outcomes
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --scenario natural
-
-# Injected decrement defect -> Router -> Debugger -> repaired PASS
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.explain_demo `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
-  --scenario defect
+```mermaid
+flowchart LR
+    U[需求] --> P[Planner]
+    P --> G[Generator]
+    G --> E[接口检查、编译、Lint、静态评分]
+    E --> V[隐藏 golden testbench 验证]
+    V -->|通过| O[RTL 与证据]
+    V -->|失败| R[Router]
+    R --> D[Debugger]
+    D --> E
 ```
 
-These commands make no LLM request: they re-run deterministic Docker verification
-and display recorded real-Debugger evidence. Add `--with-debugger` to a `natural`
-or `defect` command to call the configured real Debugger again; this consumes API
-tokens and may produce a different repair candidate. Use `--scenario all` for the
-combined demonstration.
+当前默认先生成一个独立候选；硬门禁失败或静态质量分低于 75 时按预算生成下一个候选。静态合格后进入功能验证，功能失败优先修复；无进展或修复预算耗尽时再尝试新候选。默认最多两个独立候选和三次修复。所有 EDA 命令由确定性服务通过一次性 Docker 容器执行，模型不直接获得通用 shell 权限。
 
-## Intended product
+M1 将新增独立 LangGraph 入口，复用现有 Agent、评分、EDA 和 Memory 服务；旧入口保留用于相同配置下的对照。Testbench Agent 将在 Coder 前生成辅助自检 TB，但生成 TB 的 PASS 不等于隐藏 golden TB 的功能 PASS。详见[架构](docs/03-architecture.md)与[评测协议](docs/06-evaluation.md)。
 
-The target deliverable is a local application that a user can start with Docker Compose and open in a browser. The browser will provide a chat-style interface for entering an RTL requirement, viewing generated Verilog, running EDA checks, reviewing diagnostics, and downloading the final artifacts.
+## 仓库地图
 
 ```text
-Browser UI -> API/orchestrator -> planning/generation/debug loop -> EDA sandbox
+verilog_agent/
+  agents/           Planner、Generator、Debugger；实验性 Testbench Agent
+  orchestration/    当前 Orchestrator、状态机、事件和 SQLite 审计
+  services/         候选评估、Verifier、Router、Docker EDA 网关
+  memory/           已验证设计、错误和修复策略的 SQLite 检索
+  providers/        模型提供方适配
+  benchmarks/       Human v2、RTLLM、RS 实验入口
+  web/              本地 Web 工作台代码
+tool_wrapper.py      容器内 EDA 操作与统一 ToolResult
+Dockerfile           非 root EDA 沙盒镜像
+config/              可提交的默认配置
+tests/               单元、集成与固定回归夹具
+docs/                按主题组织的手册与实验记录
+data/benchmarks/     本地基准数据；不提交仓库
+runs/                生成的任务证据；不提交仓库
 ```
 
-## Prototype sandbox
+计划中的 LangGraph 图模块和文档检索模块只会在对应里程碑实现时加入仓库。
 
-Build the current image from this directory:
+## 本地快速开始
 
-```bash
-docker build -t verilog-agent-sandbox .
-```
-
-The current image is a command-line prototype rather than the final web application. Tool
-calls accept `compile`, `lint`, `simulate`, `eval_quality`, or `benchmark`, followed by one
-or more Verilog files. All actions return the same versioned JSON contract documented in
-[`docs/TOOL_INTERFACE.md`](docs/TOOL_INTERFACE.md).
-
-Example when mounting the repository into the container:
-
-```bash
-docker run --rm --network none --read-only \
-  --tmpfs /work:rw,exec,size=64m,uid=10001,gid=10001,mode=0700 \
-  --pids-limit 128 --memory 512m --cpus 1 \
-  --mount type=bind,source="${PWD}",target=/workspace,readonly \
-  -e VERILOG_AGENT_INPUT_ROOT=/workspace/tests/fixtures \
-  verilog-agent-sandbox \
-  python3 /workspace/tool_wrapper.py compile /workspace/tests/fixtures/human_v2_prob035/TopModule.v
-```
-
-## Planned milestones
-
-1. Freeze benchmark metadata and restore Docker integration execution in the active environment.
-2. Complete Memory consolidation and controlled Scoring × Memory ablations.
-3. Add a local API and chat-style browser UI.
-4. Package the complete stack with Docker Compose and document one-command startup.
-5. Run a pinned, reproducible full benchmark and publish the release report.
-
-## Tests
-
-Install the development dependencies:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-Install the optional model-provider dependency when you want to call a real model:
-
-```bash
-python -m pip install -e ".[dev,llm]"
-```
-
-Run the fast parser unit tests:
-
-```bash
-pytest
-```
-
-Run the Docker EDA regression suite, which automatically builds the sandbox image and
-calls `tool_wrapper.py` for compile, lint, and simulation checks:
-
-```bash
-pytest --run-integration -m integration
-```
-
-The same commands run automatically in GitHub Actions for pull requests and pushes to
-`main`.
-
-Unit and CI tests use `ScriptedProvider`; they never call a model endpoint and do not consume
-API tokens. Run `python -m verilog_agent.agents.demo --offline-example` to inspect the complete
-display format without an API. Running the same module without `--offline-example` is the
-explicit live-model path. Live mode automatically loads an ignored local `.env`; use
-`--check-config` to display the effective non-secret endpoint and model without making an API
-call. See [`docs/PLANNER_GENERATOR_SHOWCASE_ZH.md`](docs/PLANNER_GENERATOR_SHOWCASE_ZH.md).
-
-To deterministically compile, lint, and statically score every generated candidate in the
-restricted Docker sandbox, then select one candidate (without claiming functional simulation), run:
+在 Windows PowerShell 中，从仓库根目录运行：
 
 ```powershell
-python -m verilog_agent.agents.demo --static-evaluation --candidates 3
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+docker build -t verilog-agent-sandbox .
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo --offline-example
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The default is two candidates; the live Generator supports either two or three. The offline
-scripted example contains exactly two candidates.
+离线演示和单元测试不调用真实模型。Docker 集成测试另用 `pytest --run-integration -m integration`；它要求 Docker Desktop 可用。真实模型需要在本地环境配置密钥与兼容的 Responses API；运行前可用 `--check-config` 查看不含密钥的有效配置。详细步骤见[快速开始](docs/02-getting-started.md)。
 
-Human v2 dataset integrity/reference preflight and one-case model-backed verification are
-documented in [`docs/VERIFICATION_HUMAN_V2_ZH.md`](docs/VERIFICATION_HUMAN_V2_ZH.md). The benchmark
-remains external to the product repository, and golden testbench/reference source is never sent
-to Planner, Generator, or Debugger.
+## 评测与安全边界
 
-To enable sparse real Debugger repair for a Human v2 case, add `--max-repairs 1` (up to 3).
-The Debugger is called only after a repairable deterministic failure; system/tool failures never
-trigger an RTL edit.
+- Human v2 的 `ref.sv` 和 golden testbench 只供 Verifier 内部使用，不进入 Planner、Generator、Debugger、可检索 Memory 或 LangSmith 原始追踪。
+- 生成 TB 用于开发反馈；有 golden TB 时，最终功能通过以独立 golden TB 为准。没有独立 oracle 的真实用户任务应单独标明验证置信度。
+- Icarus、Verilator、Yosys 只在 Docker 沙盒内运行；RTL/TB 与审计证据可持久化在宿主机，作为只读输入挂入容器。
+- 静态评分、综合统计不等于功能正确，也不等于目标芯片的真实 PPA。
+- 历史报告使用其各自记录的模型、配置和协议。M1 改造完成后重新运行新旧入口对照，不把历史百分比当成新流程的成绩。
 
-Repository configuration, logging, generated-artifact, and contribution conventions are
-defined in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Safe committed defaults live in
-[`config/default.toml`](config/default.toml); credentials never belong in that file.
-
-## Repository policy
-
-- Generated binaries, waveforms, logs, run directories, secrets, and local virtual environments are not committed.
-- LLM credentials must be supplied at runtime through environment variables or local secret files.
-- Each milestone should remain runnable and should be developed on a branch through a pull request.
+仓库采用 Git 管理代码与文档；密钥、基准原始数据和 `runs/` 产物不得提交。项目仍在研究与工程迭代阶段，具体限制见[项目概览](docs/01-overview.md)。

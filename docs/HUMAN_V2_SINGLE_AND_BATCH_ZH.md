@@ -6,12 +6,29 @@
    Reflection Router 和 Debugger。
 2. Human v2 批量评测：用于运行 1、10 或全部 156 题，并持续生成 JSON 和 Markdown 报告。
 
+这三个 benchmark 入口统一位于 `verilog_agent/benchmarks/`：
+
+- `single_case_demo.py`：单题全过程；
+- `human_v2_batch.py`：逐题批量运行和断点续跑；
+- `human_v2_compare.py`：两份同协议报告的配对比较。
+
+旧的 `verilog_agent.agents.demo` 仍是兼容入口，但实现已迁至 `benchmarks/single_case_demo.py`。
+
 ## 1. 数据文件在哪里
+
+当前候选策略（2026-10-08）：先生成 1 个，默认独立候选总上限为 2。
+`--candidates 2` 表示按需最多生成两个，不再表示一次生成两个；只有手动指定
+`--candidates 3` 才开放第三个。硬门禁失败或静态分 <75 时优先生成新候选；
+静态合格后验证，PASS 立即结束，功能 FAIL 先进入 Debugger；修复无进展
+（含原样返回）或整题修复预算耗尽后，才生成下一个独立候选。
+候选槽耗尽且静态仍不合格时，在剩余修复预算内进入静态修复；不得绕过门禁。
+生成新候选不重置修复预算；75 分本身算合格。新报告记录
+`candidate_policy=sequential_repair_first_v1`，旧批量候选协议的报告不能直接续跑混入新结果。
 
 本机 Human v2 数据目录为：
 
 ```text
-D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall
+D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2
 ```
 
 每道题有三个文件：
@@ -23,13 +40,13 @@ D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilo
 可以直接查看 prompt：
 
 ```powershell
-Get-Content "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall\Prob035_count1to10_prompt.txt"
+Get-Content "D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
 ```
 
 也可以用记事本打开：
 
 ```powershell
-notepad "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall\Prob035_count1to10_prompt.txt"
+notepad "D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
 ```
 
 ## 2. 单题全过程 Demo
@@ -43,8 +60,8 @@ cd D:\AI\VerilogMulti\VerilogAgent
 运行一题，并允许最多一次 Debugger 修复：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
-  --human-v2-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo `
+  --human-v2-root "data\benchmarks\verilog-eval-human-v2" `
   --human-v2-case Prob155_lemmings4 `
   --candidates 2 `
   --static-evaluation `
@@ -83,7 +100,6 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 1 `
   --candidates 2 `
   --max-repairs 2 `
@@ -94,7 +110,6 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 `
   --candidates 2 `
   --max-repairs 2 `
@@ -108,7 +123,6 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --rerun-failures-from runs\human-v2\gpt-5.6-terra\reports\human_v2_dev10.json `
   --candidates 2 `
   --max-repairs 3 `
@@ -147,14 +161,12 @@ Memory 中也不保存 prompt、完整 RTL、golden testbench 或官方参考 RT
 ```powershell
 # 模型 A
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型A的实际API模型ID" `
   --output runs\human-v2\model-a\reports\human_v2_batch.json
 
 # 模型 B
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型B的实际API模型ID" `
   --output runs\human-v2\model-b\reports\human_v2_batch.json

@@ -79,6 +79,24 @@ def test_result_records_success_after_one_repair() -> None:
     )
 
 
+def test_regenerated_winner_is_not_counted_as_repair_success() -> None:
+    summary = {
+        "task_id": "regenerated", "verified_rtl": True,
+        "selected_candidate_id": "cand_02",
+        "candidates": [
+            {"candidate_id": "cand_01", "parent_id": None},
+            {"candidate_id": "cand_repair_01", "parent_id": "cand_01"},
+            {"candidate_id": "cand_02", "parent_id": None},
+        ],
+        "budget": {"repair_attempts": 2, "generated_candidates": 2},
+        "events": [{"event_type": "EVENT_REPAIR_PROPOSED"}],
+    }
+    result = _result_from_summary("Prob001_zero", summary, {"status": "PASS"})
+    assert result["passed_after_repair"] is False
+    assert result["repair_attempts"] == 2
+    assert result["generated_candidates"] == 2
+
+
 def test_metrics_exclude_reference_tool_anomalies_from_agent_denominator() -> None:
     results = [
         {"status": "PASS", "passed_after_repair": False},

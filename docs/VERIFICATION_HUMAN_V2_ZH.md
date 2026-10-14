@@ -22,7 +22,7 @@ testbench。适配文件只写入忽略版本控制的 `runs/human-v2/reference/
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.verilogeval `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --dataset-root "data\benchmarks\verilog-eval-human-v2" `
   --preflight-reference --summary-only
 ```
 
@@ -49,8 +49,8 @@ Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
 下面的命令会调用真实 Planner/Generator，产生两个候选、静态排序，再运行该题 golden testbench：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
-  --human-v2-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo `
+  --human-v2-root "data\benchmarks\verilog-eval-human-v2" `
   --human-v2-case Prob001_zero `
   --static-evaluation `
   --candidates 2

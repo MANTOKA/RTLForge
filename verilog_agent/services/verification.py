@@ -217,6 +217,8 @@ class GoldenTestbenchVerificationService:
 
     @staticmethod
     def _verification_order(context: RTLTaskContext, selected: Candidate) -> list[str]:
+        if context.metadata.get("candidate_policy") == "sequential_repair_first_v1":
+            return [selected.candidate_id]
         configured = context.metadata.get("verification_order", [])
         valid_ids = {candidate.candidate_id for candidate in context.candidates}
         order = [candidate_id for candidate_id in configured if candidate_id in valid_ids]
@@ -294,5 +296,16 @@ def _debugger_feedback(result: dict[str, Any], category: str) -> dict[str, Any]:
             summary["total_mismatched_samples"] = observed_total
             summary["reported_total_mismatched_samples"] = reported_total
             summary["total_source"] = "sum_of_output_mismatches"
+        if (
+            summary["total_mismatched_samples"] == 1
+            and isinstance(summary["total_samples"], int)
+            and summary["total_samples"] > 1
+            and output_mismatches
+        ):
+            summary["temporal_pattern"] = "isolated_single_sample"
+            summary["diagnostic_focus"] = (
+                "Check initial state, reset assumptions, first-cycle sampling, and "
+                "nonblocking-assignment timing before changing steady-state logic."
+            )
         feedback["mismatch_summary"] = summary
     return feedback

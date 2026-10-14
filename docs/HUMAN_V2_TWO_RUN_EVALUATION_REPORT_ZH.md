@@ -210,6 +210,11 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 |---|---|---|---|---|---|---|
 | `Prob078_dualedge` | 2026-09-07 18:09:29–18:10:14 | `task_ffc8d6c2030b` | PASS | `cand_02` | 0 次修复；初始 `cand_01` 为 93/224，随后 `cand_02` 为 0/224 | `off`，未写入 |
 | `Prob104_mt2015_muxdff` | 2026-09-07 18:17:17–18:25:05 | `task_bf8e9f2c711b` | FAIL | `cand_02`（回退目标） | 第 1 个修复候选仍为 1/199；切换 `cand_02` 后第二次 Debugger API 请求超时 | `off`，未写入 |
+| `Prob104_mt2015_muxdff` | 2026-09-08 18:15:06–18:16:31 | `task_43fb49a535b6` | PASS | `cand_repair_03` | 3 个原始候选均为 1/199；第 3 轮修复后为 0/199 | `read_only` 运行，随后离线 consolidation 写入已验证经验 |
+
+2026-09-08 这次运行使用 `gpt-5.6-terra`、3 个候选、3 轮 Debugger 预算、Icarus Verilog 11.0 stable，
+Docker 镜像 ID 为 `sha256:54f4b9f0caeb1a69a9b8d853682e2909d6f77c7cbf9e5404fc9222af952b38d2`。
+该次产物仍未记录 temperature、top-p、token 消耗和 API 成本，因此这些字段继续标为 `NOT_RECORDED`。
 
 `Prob078` 这次通过不是 Debugger 或 Memory 的作用，而是未固定 seed 的新一轮 Generator 生成了不同
 的第二候选。失败的 `cand_01` 使用时钟电平直接选择两个边沿寄存器，得到 93 个 `q` mismatch；通过的
@@ -220,8 +225,9 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 视为同一 RTL 的稳定重现，也不能证明真实硬件存在对应的物理延迟。
 
 上述 golden 细节只用于测试后的人工原因分析，没有进入 Planner、Generator、Debugger 或 Memory。
-若把最新单题 PASS 作为补充证据回填，则当前暂定有效结果为 153/154，即 **99.35%**；按全部 156 题
-计算为 153/156，即 98.08%。这不是新的全量运行结果，必须与第二次批量回填结果 152/154 分开报告。
+若把 `Prob078` 与 2026-09-08 的 `Prob104` 最新单题 PASS 都作为补充证据回填，则当前暂定有效结果为
+154/154，即 **100%**；按全部 156 题计算为 154/156，即 98.72%。这不是新的全量运行结果，必须与
+第二次批量回填结果 152/154 分开报告，也不能当作稳定复现实验。
 
 ## 6. Memory 写入结果
 
@@ -235,6 +241,10 @@ Debugger 修改 RTL，也没有纳入第二次 9 题复测。
 | `Prob062_bugs_mux2` | `mem_d5867d41b88feb3f4320` | 两种 mux 写法无效后反转选择极性，111→0 | QUARANTINED | 1 / 2 |
 | `Prob063_review2015_shiftcount` | `mem_3c2ab74a5b9022355d66` | 修正串行输入的移位方向，1886→0 | QUARANTINED | 0 / 2 |
 | `Prob154_fsm_ps2data` | `mem_16600073aeb3ffa53532` | 将错误滑动窗口改为三状态消息收集 FSM，1008→0 | ACTIVE | 0 / 0 |
+
+2026-09-08 的离线 consolidation 保留上述历史记录，并从 172 个任务摘要中形成 153 条
+`DESIGN_PATTERN`、13 类 `ERROR_PATTERN` 和 8 条 `REPAIR_STRATEGY`（4 条 ACTIVE）。新增 Prob104
+策略只保存可迁移的首样本初始化修复和验证证据，不保存参考 RTL、golden testbench 或完整答案。
 
 `Prob131_mt2015_q4` 和 `Prob147_circuit10` 没有 Debugger 修复轨迹，所以没有生成 repair memory；这是
 当前写入门限的预期行为。5 条成功经验都保留在数据库中，但前 4 条在后续题目中累计达到两次负迁移，
@@ -263,9 +273,8 @@ FUNCTIONAL_MISMATCH` 的检索粒度偏粗，导致不相关经验被跨题注�
    被误判为 PASS。
 2. 第二次批量复测中的 `Prob078_dualedge` 没有用满 3 轮：第三次 Debugger 返回了与父候选完全相同的
    RTL，被完整性检查拒绝。后续单题虽已 PASS，但属于重新生成候选后的新证据，不能修改原批次事实。
-3. 第二次批量复测中的 `Prob104_mt2015_muxdff` 用满 3 轮且始终为 1/199；后续单题第一轮仍无进展，
-   回退后又遇到 API timeout。该题需要更细的首个 mismatch 时间、
-   输出级证据或时序语义分类，继续增加相同诊断下的修复次数意义有限。
+3. 第二次批量复测中的 `Prob104_mt2015_muxdff` 用满 3 轮且始终为 1/199；2026-09-08 的后续单题在
+   新增首样本时序分类和跨题 Memory 检索后，经 3 轮修复达到 0/199。原批次 FAIL 保持不变。
 4. 两道 Icarus cast 不兼容题仍应单列工具链异常。可使用支持相应 SystemVerilog cast 的仿真器复核，
    但不应通过修改 Agent RTL 来“适配”官方 testbench。
 5. 第二次同时改变了修复预算、候选回退、接口处理和 Memory，并重新调用了随机模型，因此

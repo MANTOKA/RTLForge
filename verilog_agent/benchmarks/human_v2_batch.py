@@ -27,6 +27,13 @@ from verilog_agent.providers import (
     ProviderConfigurationError,
     ProviderSettings,
 )
+from verilog_agent.providers.usage import (
+    batch_usage,
+    prompt_source_version,
+    sampling_markdown,
+    summarize_calls,
+    usage_markdown,
+)
 from verilog_agent.services import (
     DockerEDARunner,
     GoldenTestbenchVerificationService,
@@ -40,9 +47,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run VerilogAgent on Human v2 and continuously write JSON/Markdown reports"
     )
-    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        default=Path("data/benchmarks/verilog-eval-human-v2"),
+        help="Human v2 dataset root (default: data/benchmarks/verilog-eval-human-v2)",
+    )
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--candidates", type=int, choices=(2, 3), default=2)
+    parser.add_argument(
+        "--candidates", type=int, choices=(1, 2, 3), default=2,
+        help="Independent candidate cap; start with one, regenerate on demand (3 is opt-in)",
+    )
     parser.add_argument("--max-repairs", type=int, choices=(0, 1, 2, 3), default=2)
     parser.add_argument("--model", help="Override VERILOG_AGENT_MODEL for all LLM roles")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
@@ -142,7 +157,6 @@ def main() -> int:
         if case.problem_id in completed_ids:
             print(f"[{index}/{len(cases)}] {case.problem_id}: already recorded")
             continue
-        print(f"[{index}/{len(cases)}] {case.problem_id}: reference preflight", flush=True)
         reference = preflight_references(
             [case],
             runner,
@@ -173,7 +187,6 @@ def main() -> int:
                 "passed_after_repair": False,
             }
         else:
-            print(f"[{index}/{len(cases)}] {case.problem_id}: Agent pipeline", flush=True)
             result = _run_case(
                 case=case,
                 provider=provider,
@@ -208,6 +221,9 @@ def _run_case(
     args: argparse.Namespace,
     reference: dict[str, Any],
     memory_store: SQLiteMemoryStore | None,
+    required_module_name: str = "TopModule",
+    testbench_source: str | None = None,
+    include_reference_in_verification: bool = True,
 ) -> dict[str, Any]:
     showcase = PlannerGeneratorShowcase(
         provider=provider,
@@ -219,8 +235,14 @@ def _run_case(
             runner=runner,
             runs_root=args.runs_root,
             testbench_resolver=lambda _context: case.testbench_path,
-            reference_resolver=lambda _context: case.reference_path,
-            testbench_source=f"VerilogEval-Human-v2/{case.problem_id}",
+            reference_resolver=(
+                (lambda _context: case.reference_path)
+                if include_reference_in_verification
+                else None
+            ),
+            testbench_source=(
+                testbench_source or f"VerilogEval-Human-v2/{case.problem_id}"
+            ),
         ),
         debugger=(
             RealDebugger(provider, artifacts=ArtifactRepository(args.runs_root))
@@ -238,11 +260,14 @@ def _run_case(
             max_repairs=args.max_repairs,
             task_metadata={
                 "benchmark_problem_id": case.problem_id,
-                "required_module_name": "TopModule",
+                "required_module_name": required_module_name,
             },
         )
     except ShowcaseRunError as error:
         return {
+            "task_id": error.task_id,
+            "model_calls": error.model_calls,
+            "token_usage": summarize_calls(error.model_calls),
             "problem_id": case.problem_id,
             "status": "ERROR",
             "failure_category": "PIPELINE_ERROR",
@@ -268,6 +293,15 @@ def _result_from_summary(
     repair_attempts = sum(
         event.get("event_type") == "EVENT_REPAIR_PROPOSED" for event in events
     )
+    repair_attempts = summary.get("budget", {}).get("repair_attempts", repair_attempts)
+    selected = next(
+        (item for item in summary.get("candidates", [])
+         if item.get("candidate_id") == summary.get("selected_candidate_id")),
+        None,
+    )
+    repaired_winner = (
+        selected.get("parent_id") is not None if selected is not None else bool(repair_attempts)
+    )
     verification_cycles = sum(
         event.get("event_type") in {"EVENT_VERIFY_PASSED", "EVENT_VERIFY_FAILED"}
         for event in events
@@ -284,11 +318,15 @@ def _result_from_summary(
         "failure_category": failure_category,
         "reason": "" if summary.get("verified_rtl") else _failure_reason(summary, mismatch),
         "task_id": summary.get("task_id"),
+        "model_calls": summary.get("model_calls", []),
+        "token_usage": summary.get("token_usage", summarize_calls(summary.get("model_calls", []))),
         "selected_candidate_id": summary.get("selected_candidate_id"),
         "candidate_count": len(summary.get("candidates", [])),
+        "generated_candidates": summary.get("budget", {}).get("generated_candidates"),
+        "candidate_regenerations": summary.get("candidate_regenerations", []),
         "repair_attempts": repair_attempts,
         "verification_cycles": verification_cycles,
-        "passed_after_repair": bool(summary.get("verified_rtl") and repair_attempts),
+        "passed_after_repair": bool(summary.get("verified_rtl") and repaired_winner),
         "mismatch_summary": mismatch,
         "repair_attempt_details": summary.get("repair_attempts", []),
         "repair_fallback": summary.get("repair_fallback"),
@@ -359,6 +397,9 @@ def _initial_report(
             "model": settings.model,
             "base_url": settings.base_url,
             "candidate_count": args.candidates,
+            "candidate_policy": "sequential_repair_first_v1",
+            "initial_candidates": 1,
+            "regeneration_threshold": 75,
             "max_repairs": args.max_repairs,
             "docker_image": args.docker_image,
             "dataset_root": str(args.dataset_root.resolve()),
@@ -370,10 +411,8 @@ def _initial_report(
                 "debugger": "structured_diagnostics_only",
                 "verification": "golden_testbench_and_reference_black_box",
             },
-            "sampling": {
-                "temperature": "provider_default",
-                "seed": "not_configured",
-            },
+            "sampling": settings.sampling_configuration(),
+            "prompt_version": prompt_source_version(),
         },
         "results": [],
     }
@@ -384,9 +423,12 @@ def _validate_resume(
 ) -> None:
     configuration = report.get("configuration", {})
     expected = {
+        "sampling": settings.sampling_configuration(),
+        "prompt_version": prompt_source_version(),
         "model": settings.model,
         "base_url": settings.base_url,
         "candidate_count": args.candidates,
+        "candidate_policy": "sequential_repair_first_v1",
         "max_repairs": args.max_repairs,
         "docker_image": args.docker_image,
         "dataset_root": str(args.dataset_root.resolve()),
@@ -409,6 +451,7 @@ def _metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     )
     return {
         "completed": len(results),
+        "token_usage": batch_usage(results),
         "evaluable": evaluable,
         "passed": passed,
         "failed": evaluable - passed,
@@ -478,8 +521,11 @@ def _markdown_report(report: dict[str, Any]) -> str:
         "# VerilogEval-Human-v2 Evaluation Report",
         "",
         f"- Model: `{config['model']}`",
+        sampling_markdown(config.get("sampling", {})),
+        f"- Prompt source version: `{config.get('prompt_version', 'UNKNOWN')}`",
         f"- Protocol: `{report['protocol']}`",
-        f"- Candidates per task: {config['candidate_count']}",
+        f"- Candidate cap per task: {config['candidate_count']}",
+        f"- Candidate policy: {config.get('candidate_policy', 'legacy_batch')}",
         f"- Maximum repairs: {config['max_repairs']}",
         f"- Docker image: `{config['docker_image']}`",
         f"- Memory mode: `{config.get('memory_mode', 'off')}`",
@@ -489,6 +535,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Pass rate: {metrics['agent_pass_rate_evaluable']:.2%}",
         f"- Passed after repair: {metrics['passed_after_repair']}",
         f"- Reference/tool anomalies: {metrics['reference_skipped']}",
+        usage_markdown(metrics.get("token_usage", {})),
         "",
         (
             "| Problem | Result | Task ID | Selected | Failure category | Reason | "

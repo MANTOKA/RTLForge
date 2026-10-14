@@ -175,6 +175,31 @@ def test_debugger_feedback_uses_output_count_when_total_is_inconsistent(
     assert summary["total_source"] == "sum_of_output_mismatches"
 
 
+def test_single_sample_mismatch_focuses_debugger_on_initial_timing(
+    tmp_path: Path,
+) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'Q' has 1 mismatches. First mismatch occurred at time 5.\n"
+        "Hint: Total mismatched samples is 1 out of 199 samples\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    summary = outcome.details["debugger_feedback"]["mismatch_summary"]
+    assert summary["temporal_pattern"] == "isolated_single_sample"
+    assert "initial state" in summary["diagnostic_focus"]
+
+
 def test_verification_stops_on_infrastructure_failure(tmp_path: Path) -> None:
     context, runs_root, testbench = _context(tmp_path)
     service = GoldenTestbenchVerificationService(

@@ -28,6 +28,7 @@ ALLOWED_TRANSITIONS: dict[TaskStage, frozenset[TaskStage]] = {
     ),
     TaskStage.EVALUATING: frozenset(
         {
+            TaskStage.GENERATING,
             TaskStage.VERIFYING,
             TaskStage.CLASSIFYING,
             TaskStage.CANCELLED,
@@ -44,6 +45,7 @@ ALLOWED_TRANSITIONS: dict[TaskStage, frozenset[TaskStage]] = {
     ),
     TaskStage.CLASSIFYING: frozenset(
         {
+            TaskStage.GENERATING,
             TaskStage.REPAIRING,
             TaskStage.WAITING_FOR_USER,
             TaskStage.CANCELLED,
@@ -51,7 +53,7 @@ ALLOWED_TRANSITIONS: dict[TaskStage, frozenset[TaskStage]] = {
         }
     ),
     TaskStage.REPAIRING: frozenset(
-        {TaskStage.EVALUATING, TaskStage.CANCELLED, TaskStage.FAILED}
+        {TaskStage.EVALUATING, TaskStage.CLASSIFYING, TaskStage.CANCELLED, TaskStage.FAILED}
     ),
     TaskStage.WAITING_FOR_USER: frozenset(
         {TaskStage.SPECIFYING, TaskStage.CANCELLED, TaskStage.FAILED}

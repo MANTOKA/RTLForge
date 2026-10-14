@@ -163,6 +163,19 @@ def test_human_v2_counter_testbench_simulates(docker_image: str) -> None:
 
 
 @pytest.mark.integration
+def test_prob104_first_sample_initialization_repair(docker_image: str) -> None:
+    result = _wrapper(
+        docker_image,
+        "simulate",
+        "human_v2_prob104/tb.v",
+        "human_v2_prob104/TopModule.v",
+    )
+
+    assert result["status"] == "PASS"
+    assert "Simulation finished" in result["stdout"]
+
+
+@pytest.mark.integration
 def test_wrapper_does_not_write_build_products_to_repository(docker_image: str) -> None:
     _wrapper(
         docker_image,

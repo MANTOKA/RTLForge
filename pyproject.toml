@@ -28,6 +28,9 @@ py-modules = ["tool_wrapper"]
 [tool.setuptools.packages.find]
 include = ["verilog_agent*"]
 
+[tool.setuptools.package-data]
+"verilog_agent.web" = ["static/*.html", "static/*.css", "static/*.js"]
+
 [tool.pytest.ini_options]
 addopts = "-ra -p no:cacheprovider --basetemp=.pytest_tmp"
 testpaths = ["tests"]

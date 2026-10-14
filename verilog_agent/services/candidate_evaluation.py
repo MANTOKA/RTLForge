@@ -58,8 +58,11 @@ class DockerEDARunner:
             target = ""
             try:
                 relative = resolved_input.relative_to(host_root.parent)
-                if resolved_input.is_relative_to(host_root):
-                    matched_root = host_root
+                internal_reference_root = host_root.parent / "reference"
+                if resolved_input.is_relative_to(host_root) or resolved_input.is_relative_to(
+                    internal_reference_root
+                ):
+                    matched_root = host_root.parent
                     target = "/inputs/repo"
             except ValueError:
                 relative = Path()
@@ -190,7 +193,9 @@ class StaticCandidateEvaluator:
         candidates = context.candidates
         if context.selected_candidate_id is not None:
             selected = context.candidate()
-            if selected.parent_id is not None:
+            if selected.parent_id is not None or context.metadata.get("candidate_policy") == (
+                "sequential_repair_first_v1"
+            ):
                 candidates = [selected]
 
         for candidate in candidates:

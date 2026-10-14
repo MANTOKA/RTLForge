@@ -108,7 +108,7 @@ def test_real_debugger_writes_child_candidate_and_auditable_diff(tmp_path: Path)
     assert request["debugger_feedback"]["tool"] == "vvp"
     assert request["prior_repair_attempts"][0]["mismatch_reduction"] == 0
     assert request["last_repair_analysis"]["no_progress"] is True
-    assert request["retrieved_verified_repair_memories"][0]["memory_id"] == "mem_counter"
+    assert request["retrieved_memories"][0]["memory_id"] == "mem_counter"
     assert "test.sv" not in provider.requests[0]["input_text"]
     assert "ref.sv" not in provider.requests[0]["input_text"]
 

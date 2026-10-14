@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from verilog_agent.memory.models import MemoryItem, RepairAttempt, _now
+from verilog_agent.memory.models import MemoryItem, MemoryType, RepairAttempt, _now
 
 
 class SQLiteMemoryStore:
@@ -38,6 +38,70 @@ class SQLiteMemoryStore:
         self._upsert_memory(item)
         return item
 
+    def record_error_observation(
+        self,
+        *,
+        task_id: str,
+        candidate_id: str,
+        error_signature: str,
+        module_family: str,
+        source_problem_id: str | None,
+        summary: str,
+        evidence_path: str | None,
+    ) -> MemoryItem:
+        """Record a grounded failure pattern without presenting it as a repair."""
+        item = self._memory_item(
+            memory_type=MemoryType.ERROR_PATTERN,
+            identity=f"{error_signature}|{module_family}",
+            summary=summary,
+            error_signature=error_signature,
+            module_family=module_family,
+            applicability_conditions=(
+                f"Observed for {module_family}; use as diagnostic evidence only."
+            ),
+            recommended_action="Inspect this failure pattern before choosing a repair strategy.",
+            source_task_id=task_id,
+            source_candidate_id=candidate_id,
+            source_problem_id=source_problem_id,
+            verification_gate_reached="VERIFICATION_FAILED_OBSERVED",
+            evidence_paths=[evidence_path],
+            confidence=0.55,
+        )
+        self._upsert_memory(item)
+        return item
+
+    def record_verified_design_pattern(
+        self,
+        *,
+        task_id: str,
+        candidate_id: str,
+        module_family: str,
+        source_problem_id: str | None,
+        design_pattern: str,
+        evidence_path: str | None,
+    ) -> MemoryItem | None:
+        """Promote only a non-empty pattern attached to functionally verified RTL."""
+        pattern = design_pattern.strip()
+        if not pattern:
+            return None
+        item = self._memory_item(
+            memory_type=MemoryType.DESIGN_PATTERN,
+            identity=f"{module_family}|{pattern}",
+            summary=f"Verified {module_family} design pattern: {pattern}",
+            error_signature="",
+            module_family=module_family,
+            applicability_conditions=f"Use for {module_family} designs with a matching interface.",
+            recommended_action=pattern,
+            source_task_id=task_id,
+            source_candidate_id=candidate_id,
+            source_problem_id=source_problem_id,
+            verification_gate_reached="FUNCTIONAL_VERIFIED",
+            evidence_paths=[evidence_path],
+            confidence=0.7,
+        )
+        self._upsert_memory(item)
+        return item
+
     def retrieve(
         self,
         *,
@@ -45,6 +109,10 @@ class SQLiteMemoryStore:
         module_family: str,
         exclude_problem_id: str | None,
         limit: int = 3,
+        memory_types: tuple[str, ...] = (
+            MemoryType.REPAIR_STRATEGY.value,
+            MemoryType.ERROR_PATTERN.value,
+        ),
     ) -> list[dict[str, Any]]:
         terms = re.findall(r"[A-Za-z0-9_]+", f"{error_signature} {module_family}")
         if not terms:
@@ -56,15 +124,49 @@ class SQLiteMemoryStore:
             JOIN memory_items AS m ON m.memory_id = f.memory_id
             WHERE memory_items_fts MATCH ?
               AND m.status = 'ACTIVE'
-              AND (? IS NULL OR m.source_problem_id IS NULL OR m.source_problem_id != ?)
             ORDER BY bm25(memory_items_fts), m.confidence DESC
             LIMIT ?
         """
         with self._connect() as connection:
-            rows = connection.execute(
-                sql, (query, exclude_problem_id, exclude_problem_id, limit)
-            ).fetchall()
-        return [self._safe_retrieval(json.loads(row[0])) for row in rows]
+            rows = connection.execute(sql, (query, max(limit * 10, 50))).fetchall()
+        allowed_types = set(memory_types)
+        eligible: list[tuple[int, dict[str, Any]]] = []
+        for rank, row in enumerate(rows):
+            payload = json.loads(row[0])
+            source_ids = set(payload.get("source_problem_ids", []))
+            if payload.get("source_problem_id"):
+                source_ids.add(payload["source_problem_id"])
+            if exclude_problem_id is not None and exclude_problem_id in source_ids:
+                continue
+            if payload.get("memory_type") not in allowed_types:
+                continue
+            if payload.get("module_family") != module_family:
+                continue
+            eligible.append((rank, payload))
+        type_priority = {
+            MemoryType.REPAIR_STRATEGY.value: 0,
+            MemoryType.DESIGN_PATTERN.value: 1,
+            MemoryType.ERROR_PATTERN.value: 2,
+        }
+        eligible.sort(
+            key=lambda item: (type_priority.get(str(item[1].get("memory_type")), 9), item[0])
+        )
+        return [self._safe_retrieval(payload) for _, payload in eligible[:limit]]
+
+    def retrieve_design_patterns(
+        self,
+        *,
+        module_family: str,
+        exclude_problem_id: str | None,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        return self.retrieve(
+            error_signature=module_family,
+            module_family=module_family,
+            exclude_problem_id=exclude_problem_id,
+            limit=limit,
+            memory_types=(MemoryType.DESIGN_PATTERN.value,),
+        )
 
     def record_use(self, memory_ids: list[str], *, positive: bool) -> None:
         if not memory_ids:
@@ -98,6 +200,42 @@ class SQLiteMemoryStore:
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def supersede_coarse_repair_strategies(self) -> int:
+        """Disable generic copies when the same problem has a refined family entry."""
+        memories = self.list_memories()
+
+        def sources(item: dict[str, Any]) -> set[str]:
+            values = set(item.get("source_problem_ids", []))
+            if item.get("source_problem_id"):
+                values.add(str(item["source_problem_id"]))
+            return values
+
+        refined_sources = {
+            problem_id
+            for item in memories
+            if item.get("memory_type") == MemoryType.REPAIR_STRATEGY.value
+            and item.get("module_family") != "generic_rtl"
+            for problem_id in sources(item)
+        }
+        superseded = [
+            item["memory_id"]
+            for item in memories
+            if item.get("memory_type") == MemoryType.REPAIR_STRATEGY.value
+            and item.get("module_family") == "generic_rtl"
+            and item.get("status") != "SUPERSEDED"
+            and refined_sources.intersection(sources(item))
+        ]
+        if not superseded:
+            return 0
+        with self._connect() as connection:
+            for memory_id in superseded:
+                connection.execute(
+                    "UPDATE memory_items SET status = 'SUPERSEDED' WHERE memory_id = ?",
+                    (memory_id,),
+                )
+            self._refresh_payloads(connection, superseded)
+        return len(superseded)
+
     def _consolidate(self, attempt: RepairAttempt) -> MemoryItem:
         action = attempt.rationale.strip() or attempt.expected_impact.strip()
         digest = hashlib.sha256(
@@ -113,7 +251,7 @@ class SQLiteMemoryStore:
         ]
         return MemoryItem(
             memory_id=f"mem_{digest}",
-            memory_type="REPAIR_STRATEGY",
+            memory_type=MemoryType.REPAIR_STRATEGY.value,
             summary=(
                 f"Verified repair for {attempt.failure_category} in "
                 f"{attempt.module_family}: {action}"
@@ -141,11 +279,108 @@ class SQLiteMemoryStore:
             verification_gate_reached="FUNCTIONAL_VERIFIED",
             toolchain_version=self.toolchain_version,
             evidence_hashes=evidence_hashes,
+            source_problem_ids=(
+                [attempt.benchmark_problem_id] if attempt.benchmark_problem_id else []
+            ),
+            source_task_ids=[attempt.task_id],
+        )
+
+    def _memory_item(
+        self,
+        *,
+        memory_type: MemoryType,
+        identity: str,
+        summary: str,
+        error_signature: str,
+        module_family: str,
+        applicability_conditions: str,
+        recommended_action: str,
+        source_task_id: str,
+        source_candidate_id: str,
+        source_problem_id: str | None,
+        verification_gate_reached: str,
+        evidence_paths: list[str | None],
+        confidence: float,
+    ) -> MemoryItem:
+        digest = hashlib.sha256(f"{memory_type.value}|{identity}".encode()).hexdigest()[:20]
+        evidence_hashes = [
+            digest_value
+            for digest_value in (self._file_hash(path) for path in evidence_paths)
+            if digest_value is not None
+        ]
+        return MemoryItem(
+            memory_id=f"mem_{digest}",
+            memory_type=memory_type.value,
+            summary=summary,
+            error_signature=error_signature,
+            module_family=module_family,
+            applicability_conditions=applicability_conditions,
+            recommended_action=recommended_action,
+            source_task_id=source_task_id,
+            source_candidate_id=source_candidate_id,
+            source_problem_id=source_problem_id,
+            before_score=None,
+            after_score=None,
+            verification_gate_reached=verification_gate_reached,
+            toolchain_version=self.toolchain_version,
+            evidence_hashes=evidence_hashes,
+            source_problem_ids=[source_problem_id] if source_problem_id else [],
+            source_task_ids=[source_task_id],
+            confidence=confidence,
         )
 
     def _upsert_memory(self, item: MemoryItem) -> None:
         payload = json.dumps(item.to_dict(), ensure_ascii=False)
         with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT payload, positive_uses, negative_uses, status FROM memory_items "
+                "WHERE memory_id = ?",
+                (item.memory_id,),
+            ).fetchone()
+            if existing is not None:
+                merged = json.loads(existing[0])
+                problem_ids = set(merged.get("source_problem_ids", []))
+                if merged.get("source_problem_id"):
+                    problem_ids.add(merged["source_problem_id"])
+                new_problem_support = bool(
+                    item.source_problem_id and item.source_problem_id not in problem_ids
+                )
+                problem_ids.update(item.source_problem_ids)
+                task_ids = set(merged.get("source_task_ids", []))
+                if merged.get("source_task_id"):
+                    task_ids.add(merged["source_task_id"])
+                new_support = (
+                    new_problem_support
+                    if item.source_problem_id
+                    else item.source_task_id not in task_ids
+                )
+                task_ids.update(item.source_task_ids)
+                evidence_hashes = set(merged.get("evidence_hashes", []))
+                evidence_hashes.update(item.evidence_hashes)
+                support_count = int(merged.get("support_count", 1)) + int(new_support)
+                confidence = max(float(merged.get("confidence", 0.5)), item.confidence)
+                if new_support:
+                    confidence = min(0.95, confidence + 0.05)
+                merged.update(
+                    source_problem_ids=sorted(problem_ids),
+                    source_task_ids=sorted(task_ids),
+                    evidence_hashes=sorted(evidence_hashes),
+                    support_count=support_count,
+                    confidence=confidence,
+                    positive_uses=existing[1],
+                    negative_uses=existing[2],
+                    status=existing[3],
+                )
+                payload = json.dumps(merged, ensure_ascii=False)
+                connection.execute(
+                    "UPDATE memory_items SET confidence = ?, payload = ? WHERE memory_id = ?",
+                    (confidence, payload, item.memory_id),
+                )
+                connection.execute(
+                    "DELETE FROM memory_items_fts WHERE memory_id = ?", (item.memory_id,)
+                )
+                self._insert_fts(connection, merged)
+                return
             connection.execute(
                 """
                 INSERT OR IGNORE INTO memory_items (
@@ -165,17 +400,21 @@ class SQLiteMemoryStore:
                     payload,
                 ),
             )
-            connection.execute(
-                "INSERT OR IGNORE INTO memory_items_fts VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    item.memory_id,
-                    item.summary,
-                    item.error_signature,
-                    item.module_family,
-                    item.applicability_conditions,
-                    item.recommended_action,
-                ),
-            )
+            self._insert_fts(connection, item.to_dict())
+
+    @staticmethod
+    def _insert_fts(connection: sqlite3.Connection, payload: dict[str, Any]) -> None:
+        connection.execute(
+            "INSERT INTO memory_items_fts VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                payload["memory_id"],
+                payload["summary"],
+                payload["error_signature"],
+                payload["module_family"],
+                payload["applicability_conditions"],
+                payload["recommended_action"],
+            ),
+        )
 
     @staticmethod
     def _safe_retrieval(payload: dict[str, Any]) -> dict[str, Any]:
@@ -191,6 +430,9 @@ class SQLiteMemoryStore:
             "verification_gate_reached",
             "toolchain_version",
             "evidence_hashes",
+            "source_problem_ids",
+            "source_task_ids",
+            "support_count",
             "confidence",
         )
         return {key: payload.get(key) for key in keys}

@@ -24,6 +24,7 @@ from verilog_agent.orchestration.interfaces import (
 from verilog_agent.orchestration.state_machine import transition
 from verilog_agent.orchestration.storage import SQLiteTaskStore
 from verilog_agent.providers import ModelProviderError
+from verilog_agent.providers.usage import RecordingProvider, model_call_task
 from verilog_agent.services.reflection_router import (
     AdaptiveReflectionRouter,
     ReflectionAction,
@@ -54,6 +55,10 @@ class Orchestrator:
         self.planner = planner
         self.generator = generator
         self.debugger = debugger
+        for role, agent in (("planner", planner), ("generator", generator), ("debugger", debugger)):
+            provider = getattr(agent, "provider", None)
+            if provider is not None and not isinstance(provider, RecordingProvider):
+                agent.provider = RecordingProvider(provider, role=role)
         self.evaluator = evaluator
         self.verifier = verifier
         self.store = store
@@ -121,7 +126,8 @@ class Orchestrator:
             if context.cancel_requested:
                 self._cancel(context)
             else:
-                self._run_current_stage(context)
+                with model_call_task(context):
+                    self._run_current_stage(context)
         except BudgetExceeded as error:
             self._budget_exhausted(context, str(error))
         except ModelProviderError as error:
@@ -162,6 +168,14 @@ class Orchestrator:
         plan = self.planner.plan(context)
         context.spec_ir = plan.spec_ir
         context.task_tree_root = plan.task_tree_root
+        if self.memory_store is not None and self.memory_mode != "off":
+            context.metadata["retrieved_design_patterns"] = (
+                self.memory_store.retrieve_design_patterns(
+                    module_family=self._module_family(context.raw_spec),
+                    exclude_problem_id=context.metadata.get("benchmark_problem_id"),
+                    limit=3,
+                )
+            )
         self._record(
             context,
             EventType.PLAN_DONE,
@@ -170,9 +184,16 @@ class Orchestrator:
         self._transition(context, TaskStage.PLANNED)
 
     def _generate(self, context: RTLTaskContext) -> None:
-        candidates = self.generator.generate(context, context.budget.candidate_slots)
+        if context.budget.candidate_slots <= 0:
+            raise BudgetExceeded("candidate budget exceeded")
+        candidates = self.generator.generate(context, 1)
+        if len(candidates) != 1:
+            raise ValueError("sequential generation requires exactly one candidate")
         context.budget.record_candidates(len(candidates))
         context.candidates.extend(candidates)
+        context.selected_candidate_id = candidates[0].candidate_id
+        context.metadata["candidate_policy"] = "sequential_repair_first_v1"
+        context.metadata.pop("last_repair_analysis", None)
         self._record(
             context,
             EventType.CANDIDATES_GENERATED,
@@ -182,6 +203,21 @@ class Orchestrator:
 
     def _evaluate(self, context: RTLTaskContext) -> None:
         outcome = self.evaluator.evaluate(context)
+        score = outcome.scores.get(outcome.selected_candidate_id)
+        static_failure = not outcome.accepted or (score is not None and score < 75)
+        infrastructure_failure = outcome.category in {
+            "SYSTEM_ERROR", "TOOL_INCOMPATIBILITY", "PATH_VIOLATION", "INPUT_NOT_FOUND",
+        }
+        if static_failure and not infrastructure_failure and (
+            self._regenerate(context, "static gate failure or static score below 75")
+        ):
+            return
+        if outcome.accepted and score is not None and score < 75:
+            context.selected_candidate_id = outcome.selected_candidate_id
+            context.failure_category = "QUALITY_ERROR"
+            self._record(context, EventType.EVAL_REJECTED, {"reason": "static score below 75"})
+            self._transition(context, TaskStage.CLASSIFYING)
+            return
         if not outcome.accepted or outcome.selected_candidate_id is None:
             self._record(
                 context,
@@ -217,6 +253,23 @@ class Orchestrator:
         if candidate.parent_id is not None:
             self._record_repair_attempt(context, candidate, outcome)
         if outcome.passed:
+            if (
+                self.memory_store is not None
+                and self.memory_mode == "read_write"
+                and candidate.parent_id is None
+            ):
+                design_item = self.memory_store.record_verified_design_pattern(
+                    task_id=context.task_id,
+                    candidate_id=candidate.candidate_id,
+                    module_family=self._module_family(context.raw_spec),
+                    source_problem_id=context.metadata.get("benchmark_problem_id"),
+                    design_pattern=candidate.design_pattern,
+                    evidence_path=outcome.evidence_path,
+                )
+                if design_item is not None:
+                    context.metadata.setdefault("memory_consolidations", []).append(
+                        design_item.to_dict()
+                    )
             context.failure_category = None
             self._record(
                 context,
@@ -241,6 +294,20 @@ class Orchestrator:
             return
 
         context.failure_category = outcome.category
+        if self.memory_store is not None and self.memory_mode == "read_write":
+            feedback = self._selected_debugger_feedback(context)
+            error_item = self.memory_store.record_error_observation(
+                task_id=context.task_id,
+                candidate_id=candidate.candidate_id,
+                error_signature=self._error_signature(context, feedback),
+                module_family=self._module_family(context.raw_spec),
+                source_problem_id=context.metadata.get("benchmark_problem_id"),
+                summary=self._error_memory_summary(context, feedback),
+                evidence_path=outcome.evidence_path,
+            )
+            context.metadata.setdefault("memory_consolidations", []).append(
+                error_item.to_dict()
+            )
         self._record(
             context,
             EventType.VERIFY_FAILED,
@@ -253,6 +320,21 @@ class Orchestrator:
         self._transition(context, TaskStage.CLASSIFYING)
 
     def _classify(self, context: RTLTaskContext) -> None:
+        candidate = context.candidate()
+        if candidate.parent_id is not None:
+            analysis = self._repair_progress(context, candidate)
+            context.metadata["last_repair_analysis"] = analysis
+            if analysis.get("no_progress"):
+                self._record(
+                    context, EventType.PATCH_ROLLED_BACK,
+                    {"candidate_id": candidate.candidate_id, "restored_id": candidate.parent_id},
+                )
+                context.selected_candidate_id = candidate.parent_id
+                if not self._regenerate(context, "repair made no progress"):
+                    self._budget_exhausted(
+                        context, "repair made no progress; no candidates remaining"
+                    )
+                return
         self._select_repair_target(context)
         feedback = self._selected_debugger_feedback(context)
         decision = self.router.route(context.failure_category, feedback)
@@ -282,7 +364,17 @@ class Orchestrator:
                 EventType.PATCH_ROLLED_BACK,
                 {"candidate_id": candidate.candidate_id, "restored_id": candidate.parent_id},
             )
-        self._budget_exhausted(context, "repair budget exhausted")
+        if not self._regenerate(context, "repair budget exhausted"):
+            self._budget_exhausted(context, "repair budget exhausted")
+
+    def _regenerate(self, context: RTLTaskContext, reason: str) -> bool:
+        if context.budget.candidate_slots <= 0:
+            return False
+        context.metadata.setdefault("candidate_regenerations", []).append(
+            {"after_candidate_id": context.selected_candidate_id, "reason": reason}
+        )
+        self._transition(context, TaskStage.GENERATING)
+        return True
 
     @staticmethod
     def _selected_debugger_feedback(context: RTLTaskContext) -> dict:
@@ -478,7 +570,21 @@ class Orchestrator:
         parts = [str(context.failure_category or feedback.get("category") or "UNKNOWN")]
         if output_names:
             parts.append("outputs=" + ",".join(output_names))
+        temporal_pattern = feedback.get("mismatch_summary", {}).get("temporal_pattern")
+        if temporal_pattern:
+            parts.append(f"pattern={temporal_pattern}")
         return " ".join(parts)
+
+    @staticmethod
+    def _error_memory_summary(context: RTLTaskContext, feedback: dict) -> str:
+        mismatch = feedback.get("mismatch_summary", {})
+        pattern = mismatch.get("temporal_pattern")
+        count = mismatch.get("total_mismatched_samples")
+        samples = mismatch.get("total_samples")
+        detail = f"{count}/{samples} mismatched samples" if count is not None else "failure"
+        if pattern:
+            detail += f", temporal pattern {pattern}"
+        return f"Observed {context.failure_category or 'UNKNOWN'}: {detail}."
 
     @staticmethod
     def _module_family(raw_spec: str) -> str:
@@ -488,6 +594,7 @@ class Orchestrator:
             ("counter", ("counter", "计数器")),
             ("fifo", ("fifo", "queue", "队列")),
             ("shift_register", ("shift register", "移位寄存器")),
+            ("flip_flop", ("flip-flop", "flip flop", "flipflop", "dff", "触发器")),
             ("arithmetic", ("adder", "subtractor", "multiplier", "加法", "乘法")),
         ):
             if any(term in lowered for term in terms):
@@ -495,9 +602,20 @@ class Orchestrator:
         return "generic_rtl"
 
     def _repair(self, context: RTLTaskContext) -> None:
+        from verilog_agent.agents.validation import RepairNoProgressError
+
         context.budget.record_repair()
         parent = context.candidate()
-        repaired = self.debugger.repair(context, parent)
+        try:
+            repaired = self.debugger.repair(context, parent)
+        except RepairNoProgressError:
+            self._record(context, EventType.PATCH_ROLLED_BACK, {
+                "candidate_id": parent.candidate_id, "reason": "unchanged repair",
+            })
+            self._transition(context, TaskStage.CLASSIFYING)
+            if not self._regenerate(context, "Debugger returned an unchanged candidate"):
+                self._budget_exhausted(context, "unchanged repair; no candidates remaining")
+            return
         if repaired.parent_id != parent.candidate_id:
             raise ValueError("repair candidate must reference its parent candidate")
         repaired.metadata["memory_ids"] = [
