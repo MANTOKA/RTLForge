@@ -9,6 +9,10 @@ class AgentOutputError(ValueError):
     """Raised when model output violates the agent/domain contract."""
 
 
+class RepairNoProgressError(AgentOutputError):
+    """The debugger returned the unchanged input RTL."""
+
+
 def require_verilog_identifier(value: object, field_name: str) -> str:
     if not isinstance(value, str) or VERILOG_IDENTIFIER.fullmatch(value) is None:
         raise AgentOutputError(f"{field_name} must be a simple Verilog identifier")

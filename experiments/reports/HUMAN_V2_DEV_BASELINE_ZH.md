@@ -89,12 +89,17 @@ Adaptive Reflection Router 已实现为确定性服务：
 - 修复结果：静态质量分 100，隐藏仿真 PASS；
 - 证据：`runs/repair_replay_907116a416/repair_replay.json` 与其 `repair.patch`。
 
-对 `Prob154` 的自然失败进行了两次 Debugger 请求，但中转 API 分别发生 TLS EOF 和远端无响应断开，
-均未返回补丁。这是外部基础设施中断，不计为 Debugger 修复失败；未继续无界重试。
+对 `Prob154` 的最初两次 Debugger 请求发生 TLS EOF 和远端无响应断开；后续请求成功返回补丁，
+但复验仍为 978/1619 mismatch，没有改善。该例表明仅提供笼统功能失败类别不足以指导修复。
+
+加入不泄露 oracle 实现的结构化摘要（输出名、mismatch 数量、首次失败时刻）后，
+`Prob155_lemmings4` 首次实现自然失败闭环成功：Debugger 将长时间下落后的落地阈值从 21
+局部修正为 20，复验从 76/1003 mismatch 降为 0/1003，最终 PASS。证据位于
+`runs/repair_replay_0c8450a1da/repair_replay.json`。
 
 ## 6. 下一步
 
-1. 在中转 API 稳定后，重放 `Prob154`、`Prob155`，每题固定最多 1 次修复。
+1. 为 `Prob154` 增加受控 counterexample/波形窗口摘要，再固定预算重放。
 2. 从更多 Human v2 困难题收集自然失败，但分别报告自然失败与 defect injection。
 3. 给功能诊断增加不泄露 oracle 的 mismatch 数量、首个失败周期和输出信号摘要。
 4. 做 `统一 Debugger prompt` 与 `Adaptive Router` 消融，比较成功率、修复轮数、仿真次数、token 和墙钟时间。

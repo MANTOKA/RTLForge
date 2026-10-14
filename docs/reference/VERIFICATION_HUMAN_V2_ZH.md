@@ -18,11 +18,11 @@ SYSTEM_ERROR -> 停止，不调用 Debugger
 ## Human v2 官方参考预检
 
 先确认 156 个 prompt/test/ref triplet 完整，再让 `RefModule` 同时作为 `TopModule` 候选运行官方差分
-testbench。适配文件只写入忽略版本控制的 `runs/benchmarks/reference_adapters/`，不会修改原数据集。
+testbench。适配文件只写入忽略版本控制的 `runs/human-v2/reference/reference_adapters/`，不会修改原数据集。
 
 ```powershell
 .\.venv\Scripts\python.exe -m verilog_agent.benchmarks.verilogeval `
-  --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+  --dataset-root "data\benchmarks\verilog-eval-human-v2" `
   --preflight-reference --summary-only
 ```
 
@@ -49,8 +49,8 @@ Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
 下面的命令会调用真实 Planner/Generator，产生两个候选、静态排序，再运行该题 golden testbench：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
-  --human-v2-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall" `
+.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo `
+  --human-v2-root "data\benchmarks\verilog-eval-human-v2" `
   --human-v2-case Prob001_zero `
   --static-evaluation `
   --candidates 2
@@ -61,7 +61,8 @@ Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
 
 当前已用 `gpt-5.6-terra` 完成 `Prob001_zero` 的首个真实纵向切片：Planner 和 Generator 生成两个
 候选，`cand_01` 静态分 100 并通过 golden testbench，任务最终状态为 `COMPLETED`，
-`verified_rtl=true`。运行证据位于 `runs/task_563693e5c691/`；`runs/` 被 Git 忽略，不会把模型
+`verified_rtl=true`。运行证据位于
+`runs/human-v2/gpt-5.6-terra/tasks/task_563693e5c691/`；`runs/` 被 Git 忽略，不会把模型
 输出或 benchmark reference 提交进产品源码。
 
 本轮验证汇总：非 Docker 回归 `66 passed, 11 skipped`；设置本地测试镜像后，显式 Docker

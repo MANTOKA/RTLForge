@@ -68,17 +68,18 @@ def run_repair_replay(
         runs_root=runs_root,
         testbench_resolver=lambda _context: testbench,
         reference_resolver=lambda _context: reference,
-        testbench_source="defect_injection_hidden_oracle",
+        testbench_source=f"{failure_source}_hidden_oracle",
     )
     initial_static = evaluator.evaluate(context)
     if not initial_static.accepted:
-        raise RuntimeError(f"injected candidate failed static gates: {initial_static.reason}")
+        raise RuntimeError(f"replay candidate failed static gates: {initial_static.reason}")
     initial = verifier.verify(context, candidate)
     if initial.passed:
-        raise RuntimeError("injected candidate unexpectedly passed; no Debugger call was made")
+        raise RuntimeError("replay candidate unexpectedly passed; no Debugger call was made")
     context.failure_category = initial.category
+    initial_feedback = _selected_feedback(context, candidate.candidate_id)
     decision = AdaptiveReflectionRouter().route(
-        initial.category, _selected_feedback(context, candidate.candidate_id)
+        initial.category, initial_feedback
     )
     context.metadata["reflection_decision"] = decision.to_dict()
     if not decision.invokes_debugger:
@@ -97,6 +98,8 @@ def run_repair_replay(
     payload = {
         "mode": f"{failure_source}_repair_replay",
         "task_id": resolved_task_id,
+        "source_summary": str(source_summary),
+        "faulty_rtl": str(faulty_rtl),
         "baseline_included": failure_source == "natural_failure",
         "oracle_content_exposed_to_debugger": False,
         "initial": {
@@ -104,6 +107,7 @@ def run_repair_replay(
             "static_accepted": initial_static.accepted,
             "verification_passed": initial.passed,
             "category": initial.category,
+            "debugger_feedback": initial_feedback,
         },
         "reflection": decision.to_dict(),
         "repair": repaired.to_dict(),
@@ -115,6 +119,11 @@ def run_repair_replay(
             repaired_verification.category
             if repaired_verification
             else repaired_static.category
+        ),
+        "repaired_feedback": (
+            _selected_feedback(context, repaired.candidate_id)
+            if repaired_verification
+            else {}
         ),
     }
     output = runs_root / resolved_task_id / "repair_replay.json"

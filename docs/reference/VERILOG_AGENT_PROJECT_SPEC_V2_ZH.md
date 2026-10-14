@@ -1,12 +1,12 @@
 # VerilogCoder-MAGE Hybrid Multi-Agent RTL System
 
-## 完整项目计划书 / 需求规格说明书（网页校正版）
+## 完整项目计划书 / 需求规格说明书（来源溯源与进度校正版）
 
-> 版本：v2.2（当前进度、Memory 与正式评测版）
+> 版本：v2.5（证据驱动 Memory 进展版）
 >
 > 初版日期：2026-08-19
 >
-> 本次更新：2026-09-02
+> 本次更新：2026-09-08
 > 权威依据：用户提供的 Gemini 公开分享页“Verilog Agent System Design”完整 36 页内容  
 > 项目仓库：`D:\AI\VerilogMulti\VerilogAgent`  
 > 说明：本文档不使用工作区内 `verilog_agent_main_program.pdf` 的内容。
@@ -25,10 +25,11 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 
 系统吸收：
 
-- VerilogCoder 的结构化需求规划思想，但删除复杂 TCRG，改用轻量 Task Tree。
-- MAGE 的多候选并行探索、验证反馈和迭代修复思想。
-- 本项目的两个主要创新：Static RTL Quality Score 与分层 Memory/Consolidation。
-- 本项目的工程增强：Adaptive Reflection Router、Docker EDA 隔离、事件驱动状态机、Git 全生命周期管理和可复现实验。
+- VerilogCoder 的结构化任务分解、代码生成/调试分工和仿真/波形反馈思想；本项目不实现其 TCRG 和 AST-WT，而改用轻量 Task Tree 与结构化诊断。[VC]
+- MAGE 的多候选采样、mismatch 驱动筛选、迭代修复和状态检查点思想。[MAGE]
+- RTLFixer 的“编译器反馈 + LLM 修复”及检索增强修复思路。[RTLF]
+- 本项目拟验证的两个主要创新：Static RTL Quality Score 驱动的候选选择，以及面向 RTL 的质量门控分层 Memory/Consolidation。[ORIG-SCORE][ORIG-MEM]
+- 本项目的工程设计：三 LLM Agent 化、确定性 Evaluation/Verification、Adaptive Reflection Router、Docker EDA 隔离、事件状态机和 Git 全生命周期管理。[ORIG-ARCH][ENG]
 
 ### 1.3 核心价值
 
@@ -37,14 +38,14 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 ### 1.4 成功标准
 
 - 系统可以通过 Docker Compose 启动，并在浏览器完成全流程。
-- 固定需求下生成 2-3 个候选，并输出可解释的质量分数和选择理由。
+- 固定需求下先生成 1 个候选，默认按需最多 2 个，第三个仅手动实验开放；输出质量分数与再生成理由。
 - lint、compile、simulate、quality evaluation、benchmark 均返回统一 JSON。
 - 修复策略能按语法、功能、需求/架构问题分类路由。
 - 任务成功或终止后，后台记忆整理不阻塞前台任务。
 - 每次运行可追溯到模型配置、工具版本、评分配置和 Git commit。
 - 在固定 benchmark 上证明评分和记忆对通过率、迭代次数或成本具有正收益。
 
-### 1.5 当前实施状态（2026-09-02）
+### 1.5 当前实施状态（2026-09-08）
 
 本项目已经从方案阶段进入可运行原型阶段。下表以当前 Git 分支和测试结果为准，避免把计划功能误写成已完成功能。
 
@@ -57,14 +58,39 @@ VerilogCoder-MAGE Hybrid Multi-Agent RTL Generation and Repair System，简称 V
 | Fake 闭环 | 已完成 | 成功、修复、预算耗尽、取消和恢复场景已有测试 |
 | Real Planner Agent | 已完成第一版 | 严格结构化输出、本地校验、假设记录 |
 | Real Generator Agent | 已完成第一版 | 多候选、路径安全、内容哈希和去重 |
-| Candidate Evaluation Service | 功能分支已实现，待合并验收 | 已加入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据；`TOOL_INCOMPATIBILITY` 不再误拒绝可由 Icarus 验证的 RTL |
-| Verification Service | 第一版已实现并完成开发集复核 | 支持 golden testbench、按评分顺序回退、证据报告和受控反馈；已修复非零 `Mismatches` 被误判 PASS 的漏洞 |
-| Debugger Agent 与 Reflection Router | 第一版已实现，待合并验收 | 支持 Syntax/Functional/Timeout/Requirement/Infrastructure 确定性路由、新 child candidate、可审计 diff、重评分与复验 |
-| Memory 与 Consolidation Worker | 待完成 | 已有设计，尚无长期记忆实现和消融证据 |
+| Candidate Evaluation Service | 已完成第一版 | 已接入 SpecIR 接口门禁、版本化 ScoreCard、阈值、扣分证据、排序和验证失败后的候选回退；`TOOL_INCOMPATIBILITY` 不再误拒绝可由 Icarus 验证的 RTL |
+| Verification Service | 已完成第一版 | 支持 golden testbench、按评分顺序回退、证据报告和受控反馈；非零输出 mismatch 即使 aggregate 为零也不会误判 PASS |
+| Debugger Agent 与 Reflection Router | 已完成第一版 | 支持 Syntax/Functional/Timeout/Requirement/Infrastructure 确定性路由、新 child candidate、可审计 diff、重评分、复验、回滚和修复预算 |
+| 证据驱动 Memory | 三类已实现 | `DESIGN_PATTERN`、`ERROR_PATTERN`、`REPAIR_STRATEGY` 已接入在线门控与角色检索；支持同题隔离、support count、负迁移 `QUARANTINED` 和粗粒度策略 `SUPERSEDED` |
+| Consolidation Worker 与完整五类 Memory | 部分完成 | 已有可重复运行的确定性离线 consolidation；`PROJECT`、`HUMAN_INTERVENTION` 专用 schema、异步队列、语义聚类和受控 A/B 尚未完成 |
 | API、Browser UI、Docker Compose | 待完成 | 不属于当前可演示闭环 |
-| VerilogEval-Human v2 正式评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；模型基线与冻结版本仍待完成 |
+| VerilogEval-Human v2 工程评测 | 部分完成 | 156 题 triplet 完整；官方参考预检 154 PASS、2 项 Icarus cast 工具不兼容；首轮全量模型基线 145/154，定向复测回填为 152/154；尚无冻结元数据下的独立复现实验或消融 |
 
-当前非 Docker 快速回归结果为 `77 passed, 12 skipped`；显式复用本地 EDA 镜像运行时，12 项 Docker 集成测试为 `12 passed`。固定 10 题开发集的 20 个候选经修正后裁决器复核均为 0 mismatch；困难扩展集的 `Prob154`、`Prob155` 暴露真实功能失败。该结果证明开发闭环和工具链回归，不等于 156 题正式 Agent 评测成绩。
+2026-09-08 当前工作区快速回归为 `122 passed, 13 skipped`，默认跳过的 13 项 Docker 集成测试另行显式执行为 `13 passed`。Prob104 的官方参考与修复后 Agent RTL 均在 golden testbench 上通过，Agent 经三轮 Debugger 从 `1/199` 收敛到 `0/199`。对 172 个已有任务摘要执行离线 consolidation 后，数据库包含 153 条去重 verified design pattern、13 类 error pattern 和 8 条 repair strategy（4 条 ACTIVE）。RTLLM 2.1 的 50 题适配器、单题 Demo 和可恢复逐题批量入口也已实现；官方参考预检为 47 PASS、3 项 Icarus/testbench 工具不兼容，并完成 1 个单题与 1 个批量烟雾测试，尚未执行完整模型评测。这些数字证明数据管线和单题检索闭环工作，不证明 Memory 提升总体通过率。Human v2 的首次顺序全量运行仍为 145/154 = 94.16%，定向复测回填仍为 152/154 = 98.70%；完整边界见 `HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md`、`MEMORY_IMPLEMENTATION_ZH.md` 与 `RTLLM_EVALUATION_ZH.md`。
+
+### 1.6 来源与原创标记规范
+
+本文档从 v2.3 起使用以下标记，防止把工程选择或待验证假设误写成已有文献结论：
+
+| 标记 | 含义 |
+|---|---|
+| `[VC]` | 直接来源或明确借鉴 VerilogCoder 论文/官方代码 |
+| `[MAGE]` | 直接来源或明确借鉴 MAGE 论文/官方代码 |
+| `[VE2]` | 来源于 VerilogEval v2 官方数据集、脚本或论文 |
+| `[RTLF]` | 借鉴 RTLFixer 的编译反馈、RAG/ReAct 修复路线 |
+| `[VERILATOR]` | 规则名称或语义来自 Verilator 官方诊断文档 |
+| `[AGENT-MEM]` | 仅借鉴通用 Agent Memory 文献，不代表其验证了 RTL 场景 |
+| `[ORIG-*]` | 本项目提出的机制或组合，尚需本项目实验验证 |
+| `[ENG]` | 通用软件/EDA 工程设计，不主张为学术创新 |
+| `[IMPL]` | 已在本仓库实现和测试的事实 |
+
+“参考”分为三种强度：
+
+1. **直接复现**：概念和运行方式与来源基本一致；必须给出具体来源。
+2. **改造借鉴**：只继承目标或局部机制，数据结构、规则或实现由本项目重做。
+3. **原创/工程假设**：来源没有提出该机制；必须写明验证计划，不能用来源论文的成绩为其背书。
+
+除 `[IMPL]` 外，设计描述不代表已经实现；除已有论文明确消融外，引用也不代表该机制在本项目中必然有效。
 
 ---
 
@@ -133,10 +159,12 @@ flowchart TD
 
 ### 3.2 轻量化原则
 
+> 来源说明：三 Agent 化、确定性服务、SQLite/FTS5、SSE、候选数 2-3 和修复预算均为本项目工程设计，不是 VerilogCoder 或 MAGE 的原始结论。[ORIG-ARCH][ENG]
+
 - Agent 数量固定为三个，不允许运行时无限派生。
 - 网页方案中的 Candidate Evaluation Agent 和 Verification Agent 降级为普通服务，因为它们的核心工作是规则计算、工具调用和状态判定，不需要独立人格或 LLM 对话。
 - Agent 不直接互相调用，只能读写受控的 `RTLTaskContext` 并发送事件。
-- 默认候选数为 2，研究模式最多 3；修复默认最多 3 轮。
+- 初始候选数为 1，默认独立候选总上限为 2，手动研究模式最多 3；修复默认最多 3 轮，整题累计。
 - 使用 SQLite/FTS5 起步，不在 MVP 引入独立向量数据库。
 - 先对全部候选执行接口检查、静态评分和快速 lint，再按排序依次进入成本较高的编译、仿真和综合阶段；排名第一的候选失败时，在预算内回退验证下一候选，不能仅凭静态分永久淘汰其余候选。
 - Memory Consolidation 作为异步 Worker 执行，不调用 LLM 也能完成基础去重、统计和降权；只有需要把多条成功经验泛化成自然语言策略时才可选调用一次模型。
@@ -161,7 +189,7 @@ flowchart TD
 
 ### 4.1 Requirement Planner Agent
 
-职责：把原始 Specification 转换为轻量 Task Tree，而不是 VerilogCoder 的复杂 TCRG。
+职责：把原始 Specification 转换为轻量 Task Tree，而不是 VerilogCoder 的复杂 TCRG。任务分解和规划/执行分离借鉴 VerilogCoder；用树替代 TCRG、`SpecIR` schema 和本地校验是本项目简化设计。[VC][ORIG-ARCH][IMPL]
 
 输入：
 
@@ -180,7 +208,7 @@ flowchart TD
 
 ### 4.2 RTL Generation Agent
 
-职责：依据 Task Tree 和 Design Pattern Memory 并行生成 2-3 个完整候选。
+职责：依据 Task Tree 和 Design Pattern Memory 逐个生成独立候选。先生成 1 个，硬门禁失败或静态分 <75 时按需生成新候选；静态合格后先验证，功能失败优先 Debugger 修复，无进展或修复预算耗尽才重新生成。默认独立候选总上限 2，第三个仅手动指定开放，PASS 立即结束。修复预算整题累计，不随再生成重置。槽耗尽且静态仍不合格时，使用剩余修复预算处理静态问题。多候选探索动机借鉴 MAGE，顺序触发和低预算策略为本项目设计，节省 token 的幅度仍需实际评测。[MAGE][ORIG-ARCH][IMPL]
 
 候选应体现受控差异，例如：
 
@@ -194,9 +222,9 @@ flowchart TD
 
 ### 4.3 Candidate Evaluation Service
 
-职责：在昂贵验证前，对全部候选执行接口检查和 Static RTL Quality Score，筛出最适合进入 Verification 的候选。
+职责：在昂贵验证前，对全部候选执行接口检查和 Static RTL Quality Score，筛出最适合进入 Verification 的候选。MAGE 使用仿真 mismatch 对候选排序，但没有提出本文的预验证静态加权分数；因此 StaticScore、接口门禁和评分排序属于本项目拟创新。[MAGE][ORIG-SCORE][IMPL]
 
-它调用 `tool_wrapper.py eval_quality`，而不是依靠 LLM 主观打分。主要检查：
+它调用 `tool_wrapper.py eval_quality`，而不是依靠 LLM 主观打分。LATCH、CASEINCOMPLETE、COMBDLY、BLKSEQ、UNUSED、UNDRIVEN、WIDTH 等名称和基本语义来自 Verilator 官方 warning taxonomy；把这些诊断变成扣分项、阈值和候选排序是本项目设计。[VERILATOR][ORIG-SCORE]
 
 - 复位形式是否符合规格。
 - Latch 风险。
@@ -211,7 +239,7 @@ flowchart TD
 
 ### 4.4 Verification Service
 
-职责：按 Candidate Evaluation 给出的排序对候选执行分阶段验证。默认从第一名开始；若其未通过功能验证，则在剩余预算内继续验证下一候选，再决定进入 Debugger 修复的 Active Candidate。
+职责：按 Candidate Evaluation 给出的排序对候选执行分阶段验证。Icarus/testbench 验证来自 VerilogEval、VerilogCoder 和 MAGE 的共同实践；“接口→lint→compile→simulate→benchmark”的固定流水线、候选回退和统一 `ToolResult` 是本项目工程设计。[VE2][VC][MAGE][ENG][IMPL]
 
 推荐顺序：
 
@@ -243,7 +271,7 @@ Verification 必须同时记录 testbench 来源和验证置信度，不能把�
 
 ### 4.5 Debugger Agent
 
-职责：根据 Router 选择的专用 Reflection Policy，对当前最佳候选进行局部、可回滚的修复。
+职责：根据 Router 选择的专用 Reflection Policy，对当前最佳候选进行局部、可回滚的修复。编译日志反馈借鉴 RTLFixer，仿真/波形反馈借鉴 VerilogCoder，mismatch 改善与 checkpoint 思路借鉴 MAGE；本文的统一 Debugger、child-candidate 谱系和接受/回滚条件是改造设计。[RTLF][VC][MAGE][ORIG-ROUTER][IMPL]
 
 输入：当前 RTL、错误分类、最小必要日志、相关 Memory、允许修改范围和剩余预算。
 
@@ -260,7 +288,7 @@ Verification 必须同时记录 testbench 来源和验证置信度，不能把�
 
 ## 5. Adaptive Reflection Router
 
-Router 是确定性决策模块，不必做成新的 LLM Agent。
+Router 是确定性决策模块，不必做成新的 LLM Agent。RTLFixer、VerilogCoder 和 MAGE 都证明了不同外部反馈可支持修复，但没有提出本文这张 Syntax/Functional/Requirement/Infrastructure 映射表；该 taxonomy、优先级和路由表属于本项目原创工程机制，当前第一版已实现，仍需 R0/R1/R2 消融验证。[RTLF][VC][MAGE][ORIG-ROUTER][IMPL]
 
 | 失败现象 | Category | Reflection Policy | 修复重点 |
 |---|---|---|---|
@@ -275,13 +303,15 @@ Requirement Reflection 不等于擅自放宽需求。若需要改变用户约束
 
 ## 6. 创新点一：Static RTL Quality Score
 
+> 归属声明：这是本项目拟创新，不是 VerilogCoder/MAGE 已有机制。其底层诊断信号来自 Verilator，候选探索动机来自 MAGE；具体硬门禁、扣分权重、阈值、词典序排序和 score-delta 回滚均由本项目提出，只有完成第 25 节消融后才能声称有效。[VERILATOR][MAGE][ORIG-SCORE]
+
 ### 6.1 设计目的
 
-评分用于在仿真前比较 2-3 个候选，并为修复提供连续的进步信号。它不是功能正确性的替代品，也不能让高静态分候选绕过验证。
+评分用于仿真前判定当前候选是否需要重新生成，并为修复提供连续的进步信号；独立候选按需逐个产生。它不是功能正确性的替代品，也不能让高静态分候选绕过验证。
 
 ### 6.2 两级评分机制
 
-第一级为硬门槛：
+第一级为硬门槛。以下门禁集合和执行顺序是本项目为“失败尽早、成本递增”提出的工程假设，并非论文中的标准规则：[ORIG-SCORE][ENG]
 
 1. 路径和文件合法。
 2. 接口与 `SpecIR` 一致。
@@ -304,7 +334,7 @@ StaticScore = 100
               - CombLoopPenalty
 ```
 
-网页原方案可作为初始规则：LATCH -30、同步复位违例 -20、CASEINCOMPLETE -15、UNDRIVEN -15、COMBDLY/BLKSEQ -10、UNUSED -5。正式实现时权重必须配置化，并通过 benchmark 校准，不能写死为研究结论。
+网页原方案可作为初始规则：LATCH -30、同步复位违例 -20、CASEINCOMPLETE -15、UNDRIVEN -15、COMBDLY/BLKSEQ -10、UNUSED -5。规则名可由 Verilator 文档支持，但这些数值没有来自 VerilogCoder、MAGE 或 Verilator 的实验依据，是项目初始超参数；正式实现时必须配置化，并通过消融校准，不能写成文献结论。[VERILATOR][ORIG-SCORE]
 
 ### 6.3 综合排序
 
@@ -344,6 +374,8 @@ StaticScore = 100
 
 ## 7. 创新点二：五类 Memory 与后台整理
 
+> 归属声明：VerilogCoder 和 MAGE 没有提出本文的五类长期 Memory。工作/情景/长期分层仅受 Reflexion、Generative Agents 和 MemGPT 等通用 Agent Memory 工作启发；面向 RTL 的五类 schema、质量写入门控、证据哈希、负迁移降权和异步 Consolidation 是本项目拟创新，尚需第 25 节消融证明。[AGENT-MEM][ORIG-MEM]
+
 ### 7.1 五类知识库
 
 | Memory | 核心内容 | 使用阶段 |
@@ -364,7 +396,7 @@ StaticScore = 100
 
 ### 7.3 Memory Consolidation Worker
 
-该 Agent 是后台异步任务，不进入前台关键路径。
+该 Worker 是后台异步任务，不进入前台关键路径。把任务轨迹抽象为高层反思受到 Generative Agents 的“记录-反思-检索”和 Reflexion 的 episodic reflection 启发；后台触发条件、去重规则和 RTL 策略泛化流程为本项目设计。[AGENT-MEM][ORIG-MEM]
 
 触发条件：任务成功，或任务达到上限后终止。
 
@@ -386,7 +418,7 @@ StaticScore = 100
 
 ### 7.5 轻量检索
 
-MVP 采用 SQLite 元数据过滤 + FTS5/BM25：
+MVP 采用 SQLite 元数据过滤 + FTS5/BM25。该选型是本项目的轻量工程决策，不是上述论文指定的实现，也不主张算法创新：[ENG][ORIG-MEM]
 
 1. 按模块类型、错误代码、工具和项目过滤。
 2. 全文检索候选知识。
@@ -513,7 +545,7 @@ benchmark     -> Yosys 快速综合与资源统计
 
 ### 10.2 多候选生成
 
-- FR-010：每次生成 2-3 个可区分候选。
+- FR-010：每次生成 1 个独立候选，默认总上限 2；第三个仅显式实验开放。
 - FR-011：保存候选 ID、父版本、提示版本、模型参数和代码哈希。
 - FR-012：候选必须遵循已确认的接口契约。
 
@@ -703,7 +735,7 @@ v1.0.0
 
 ### 14.6 当前 Git 起点
 
-产品仓库已经在 `MANTOKA/verilog-agent` 创建为私有仓库，本地 `main` 跟踪 `origin/main`。首次基线提交为 `3c21a94 Establish initial VerilogAgent baseline`，提交身份为 `mantoka <shichao716@outlook.com>`。父目录中的论文、MAGE 和 VerilogCoder 参考源码不属于产品仓库。当前尚未创建 `v0.0.1-prototype` 标签；应在 V2.1 权威项目书、自动化基线测试和最小工程配置合并后创建该标签，避免把仅有手工验证的状态标记为可复现里程碑。
+产品仓库已经在 `MANTOKA/verilog-agent` 创建为私有仓库，本地 `main` 跟踪 `origin/main`；当前开发快照位于 `agent/human-v2-batch-eval`，其历史提交已包含 Human v2 全量/定向复测报告，尚待按 PR 流程合入 `main`。首次基线提交为 `3c21a94 Establish initial VerilogAgent baseline`，提交身份为 `mantoka <shichao716@outlook.com>`。父目录中的论文、MAGE 和 VerilogCoder 参考源码不属于产品仓库。`v0.0.1-prototype`、`v0.1.0-sandbox` 和 `v0.2.0-orchestrator` 标签已创建；后续标签必须对应已合并、可复现的提交，不能把本地运行产物或未冻结评测当作 release。
 
 ---
 
@@ -751,7 +783,7 @@ v1.0.0
 
 - 实现 OpenAI-compatible Provider。
 - Planner 输出 schema 校验的 SpecIR/Task Tree。
-- Generator 生成 2-3 个差异候选并去重。
+- Generator 按静态失败/低分或修复无进展/预算耗尽逐个生成候选，并跨次去重；默认最多 2 个。
 
 第 6 周：Candidate Evaluation 与评分创新
 
@@ -769,13 +801,13 @@ v1.0.0
 
 ### Phase 3：Memory 与收敛评测（第 8-9 周）
 
-第 8 周：任务内记忆和五类存储
+第 8 周：任务内记忆和五类存储（**三类证据库已完成，完整目标进行中**）
 
-- SQLite schema、artifact repository、候选谱系和修复轨迹。
-- 五类 Memory 的数据结构、来源和用户管理。
-- 任务重放和进程重启恢复。
+- 已实现 SQLite `RepairAttempt`、`MemoryItem`、候选谱系和验证证据摘要。
+- 已实现 Design/Error/Repair 三类写入门控、FTS5/BM25 角色检索、`off/read_only/read_write`、同题隔离、跨题 support count、负迁移 quarantine 和粗粒度策略 supersede。
+- 已实现扫描既有任务摘要的确定性离线 consolidation；Project/Human Intervention 专用 schema 与异步调度尚未实现。
 
-第 9 周：Memory Consolidation
+第 9 周：Memory Consolidation（**待完成**）
 
 - 异步整理队列。
 - 去重、聚类、泛化、置信度和负收益降权。
@@ -1344,7 +1376,7 @@ Interaction effect  = (D - C) - (B - A)
 
 1. **加强 SpecIR**：明确端口、位宽、signedness、复位、周期延迟、优先级和边界条件。
 2. **接口门禁前置**：生成后立即做模块名、端口和位宽检查，减少无效仿真。
-3. **提高候选差异性**：要求结构差异而非只改变变量名；默认 2 个，复杂任务按预算升至 3 个。
+3. **提高候选差异性**：要求结构差异而非只改变变量名；初始 1 个，按需最多 2 个，第三个仅手动实验开放。
 4. **真实 Verification**：先建立可靠 oracle 和 failure taxonomy，再实现 Debugger。
 5. **类别化 Debugger**：从 syntax/interface 开始，再扩展 reset/latency/FSM/handshake。
 6. **Counterexample 最小化**：只提供首个失败周期、相关信号和期望/实际值，降低上下文噪声。
@@ -1400,3 +1432,179 @@ Human v2 不应用作反复调 prompt 的唯一开发集。应划分开发子集
 ```
 
 这一顺序确保每个新模块都有前一阶段产生的真实数据和客观验收标准，而不是先实现复杂机制，再寻找能够证明它有用的案例。
+
+---
+
+## 28. 模块来源、改造与原创性矩阵
+
+### 28.1 总表
+
+| 模块/机制 | 直接参考 | 本项目改造或新增 | 归属与证据强度 |
+|---|---|---|---|
+| Planner 的任务分解 | VerilogCoder 的 task planning、sub-task dependency、TCRG retrieval [VC] | 删除 TCRG，改用 JSON `SpecIR + TaskTree`、schema 校验与假设记录 | 改造借鉴；轻量树及数据契约为 `[ORIG-ARCH]` |
+| Planner/Generator/Debugger 分工 | VerilogCoder 的 code/debug agent 分工；MAGE 的多角色生成/验证/修复 [VC][MAGE] | 固定为 3 个 LLM Agent，Evaluator/Verifier 程序化 | `[ORIG-ARCH]`，工程价值需用延迟/成本对比证明 |
+| 顺序候选生成 | MAGE 的候选采样和 mismatch 排序 [MAGE] | 初始 1、默认最多 2，第三个手动开放；静态失败/低分或修复无进展/耗尽触发新候选 | 采样动机来自 MAGE；预算和触发管线为 `[ORIG-SCORE]` |
+| Icarus + golden testbench | VerilogEval、VerilogCoder、MAGE [VE2][VC][MAGE] | Docker 封装、统一 JSON、隔离工作区 | 工具链借鉴；封装为 `[ENG][IMPL]` |
+| Verilator lint | Verilator 官方诊断体系 [VERILATOR] | 将诊断转换成 ScoreCard 和门禁 | 工具语义有来源；量化方法为 `[ORIG-SCORE]` |
+| Yosys benchmark | Yosys 通用开源综合工具 | 只报告结构/资源统计，不宣称真实 PPA | `[ENG]`；不是 VerilogCoder/MAGE 创新 |
+| 五级硬门禁 | 无对应论文直接提出 | interface→lint→compile→simulate→benchmark，成本递增和早停 | `[ORIG-SCORE][ENG]`，待消融 |
+| Static RTL Quality Score | MAGE 提供候选搜索动机；Verilator 提供诊断信号 [MAGE][VERILATOR] | 权重、阈值、词典序排序、score-delta 接受/回滚 | `[ORIG-SCORE]`，核心拟创新，待消融 |
+| 编译错误修复 | RTLFixer 的 compiler feedback、RAG/ReAct；VerilogCoder debug flow [RTLF][VC] | 统一到 Debugger child candidate 和受控 diff | 改造借鉴 |
+| 功能错误修复 | VerilogCoder 的 simulation + AST-WT；MAGE 的 mismatch/checkpoint [VC][MAGE] | 不实现 AST-WT，不暴露完整 golden TB；只给结构化诊断和精简 counterexample | 改造借鉴；反馈最小化为 `[ORIG-ROUTER]` |
+| Adaptive Reflection Router | 上述工作证明反馈类型有用，但无本文规则表 [RTLF][VC][MAGE] | Syntax/Functional/Timeout/Requirement/Infrastructure 分类与确定性路由 | `[ORIG-ROUTER]`，待独立消融 |
+| 回滚与 no-progress | MAGE 的 mismatch 非增检查和 state checkpoint [MAGE] | gate/score 双重接受、最佳候选保护、重复错误早停 | 改造借鉴 + `[ORIG-ROUTER]` |
+| Episodic Memory | Reflexion 的 episodic reflection buffer [AGENT-MEM] | 保存 RTL 候选谱系、工具证据和修复收益 | RTL 化设计为 `[ORIG-MEM]` |
+| 分层记忆 | Generative Agents 的记录/反思/检索；MemGPT 的 memory tiers [AGENT-MEM] | 五类 RTL Memory、Agent 可见性边界和证据 schema | `[ORIG-MEM]`，不可声称被通用论文验证 |
+| Memory 写入门控 | 无直接等价来源 | 仅 gate 提升/仿真成功/跨任务复验后写入 | `[ORIG-MEM]`，核心拟创新，待消融 |
+| Consolidation/负迁移降权 | Generative Agents 的高层 reflection 提供概念启发 [AGENT-MEM] | 异步去重、泛化、收益统计、降权/隔离 | `[ORIG-MEM]` |
+| SQLite FTS5/BM25 | 无特定研究来源 | 轻量检索实现 | `[ENG]`，不作为学术创新 |
+| Event Bus/SQLite checkpoint | 无特定 RTL 论文来源 | 类型化进程内事件、持久化和恢复 | `[ENG][IMPL]` |
+| Docker 安全策略 | 通用容器安全工程 | 非 root、禁网、只读根、资源/路径/超时限制 | `[ENG][IMPL]` |
+| Scoring×Memory 2×2 消融 | 通用因子实验设计 | 用于独立估计两个创新的主效应和交互效应 | `[ENG]`；实验设计而非系统创新 |
+
+### 28.2 明确不能作出的来源声明
+
+在本项目完成实验前，禁止在论文、答辩或 README 中使用下列表述：
+
+- “VerilogCoder/MAGE 提出了本项目的 Static RTL Quality Score。”
+- “Verilator 官方推荐 LATCH 扣 30 分、UNUSED 扣 5 分。”
+- “MAGE 证明了本项目的五级硬门禁最优。”
+- “VerilogCoder 提出了 Syntax/Functional/Requirement Router。”
+- “MAGE 或 VerilogCoder 提出了五类 RTL Memory。”
+- “Reflexion/Generative Agents/MemGPT 已证明该 Memory 在 RTL 生成中有效。”
+- “Yosys generic synthesis 给出了真实芯片频率、功耗和面积。”
+- “三 Agent 一定优于五 Agent。”
+
+可以使用的准确表述是：
+
+- “本项目受 MAGE 多候选搜索启发，提出了基于确定性静态质量分的低成本候选预排序方法。”
+- “评分特征基于 Verilator 公开诊断，但权重、门禁和排序策略由本项目设计并通过消融评估。”
+- “本项目受通用 Agent episodic/hierarchical memory 启发，提出面向 RTL 验证证据的五类质量门控记忆。”
+- “Router 综合 RTLFixer 的编译反馈、VerilogCoder 的仿真/波形调试和 MAGE 的 mismatch 修复思路；具体 taxonomy 是本项目设计。”
+- “三 Agent 架构是降低模型调用和提高确定性的工程取舍，其收益通过成本、延迟与正确率评价。”
+
+### 28.3 证据等级
+
+| 等级 | 定义 | 在项目书中的使用方式 |
+|---|---|---|
+| E1 | 原论文/官方代码明确描述且可定位 | 可写“来源于/复现” |
+| E2 | 原论文提供相关思想，但本项目改变结构或使用场景 | 写“受启发/改造借鉴” |
+| E3 | 通用工具文档或工程惯例支持局部规则 | 写“工程依据”，不写学术创新已被证明 |
+| E4 | 本项目新假设，尚无实验 | 写“拟创新/待验证” |
+| E5 | 本仓库测试或正式消融产生的证据 | 实验完成后才能写“本项目结果表明” |
+
+当前两个核心创新主要处于 E4；Candidate Evaluation、Verification、Debugger 和三类证据驱动 Memory 已具有部分 E5 工程测试证据（包括一次 Human v2 全量基线、定向复测和离线 consolidation），但没有固定配置下的全量复现或 Scoring x Memory 对照消融，不能升级为“有效性已证明”。
+
+---
+
+## 29. 参考文献与代码来源
+
+以下仅列本文实际用于设计溯源的主要来源。访问日期统一为 2026-09-04。
+
+### [VC] VerilogCoder
+
+Ho, C.-T., Ren, H., & Khailany, B. “VerilogCoder: Autonomous Verilog Coding Agents with Graph-based Planning and Abstract Syntax Tree (AST)-based Waveform Tracing Tool.” *Proceedings of the AAAI Conference on Artificial Intelligence*, 2025.
+
+论文：https://ojs.aaai.org/index.php/AAAI/article/view/32007
+
+官方代码：https://github.com/NVlabs/VerilogCoder
+
+本文采用的证据边界：支持结构化任务规划、sub-task dependency、code/debug agent 分工、Icarus 仿真反馈和 AST-WT 功能调试。本文的轻量 Task Tree、静态评分、Router taxonomy 和 Memory 不属于该论文原始机制。
+
+### [MAGE] MAGE
+
+Zhao, Y., Zhang, H., Huang, H., Yu, Z., & Zhao, J. “MAGE: A Multi-Agent Engine for Automated RTL Code Generation.” arXiv:2412.07822, 2024.
+
+论文：https://arxiv.org/abs/2412.07822
+
+官方代码：https://github.com/stable-lab/MAGE
+
+本文采用的证据边界：支持多候选采样、mismatch 排序、迭代编辑、testbench/simulation feedback 和 state checkpoint。MAGE 没有提出本文的 StaticScore、五级门禁或五类 Memory。
+
+### [VE2] VerilogEval v2
+
+Pinckney, N., Batten, C., Liu, M., Ren, H., & Khailany, B. “Revisiting VerilogEval: Newer LLMs, In-Context Learning, and Specification-to-RTL Tasks.” arXiv:2408.11053, 2024.
+
+论文：https://arxiv.org/abs/2408.11053
+
+官方 benchmark：https://github.com/NVlabs/verilog-eval
+
+许可证：https://github.com/NVlabs/verilog-eval/blob/main/LICENSE
+
+本文采用的证据边界：Human v2 规格、golden testbench、参考 RTL、Icarus 验证脚本和官方采样协议。基准只负责测量，不为本项目架构提供有效性证明。
+
+### [RTLF] RTLFixer
+
+Tsai, Y.-D., Liu, M., & Ren, H. “RTLFixer: Automatically Fixing RTL Syntax Errors with Large Language Models.” arXiv:2311.16543, 2023.
+
+论文：https://arxiv.org/abs/2311.16543
+
+官方代码：https://github.com/NVlabs/RTLFixer
+
+本文采用的证据边界：支持使用编译器反馈、RAG 和 ReAct 修复 RTL 语法错误；不支持本文完整 Router taxonomy 或 Memory 门控的来源声明。
+
+### [VERILATOR] Verilator diagnostics
+
+Verilator Project. “Errors and Warnings.”
+
+官方文档：https://verilator.org/guide/latest/warnings.html
+
+本文采用的证据边界：LATCH、CASEINCOMPLETE、COMBDLY、BLKSEQ、UNUSED、UNDRIVEN 等诊断的名称和语义。扣分数值、阈值及组合方式不是 Verilator 官方建议。
+
+### [AGENT-MEM] 通用 Agent Memory 启发
+
+Shinn, N. et al. “Reflexion: Language Agents with Verbal Reinforcement Learning.” arXiv:2303.11366, 2023.
+
+https://arxiv.org/abs/2303.11366
+
+Park, J. S. et al. “Generative Agents: Interactive Simulacra of Human Behavior.” arXiv:2304.03442, 2023.
+
+https://arxiv.org/abs/2304.03442
+
+Packer, C. et al. “MemGPT: Towards LLMs as Operating Systems.” arXiv:2310.08560, 2023.
+
+https://arxiv.org/abs/2310.08560
+
+本文采用的证据边界：episodic reflection、记录-反思-检索和分层 memory tier 的一般思想。五类 RTL Memory、质量写入门控、证据哈希、负迁移降权和 Consolidation 算法均为本项目设计。
+
+### 工具来源
+
+- Icarus Verilog：https://steveicarus.github.io/iverilog/
+- Yosys：https://yosyshq.readthedocs.io/projects/yosys/en/latest/
+- Docker Engine security/rootless documentation：https://docs.docker.com/engine/security/rootless/
+
+这些工具来源支持实现可复现性和工程边界，不构成本项目学术创新的归属依据。
+
+### 29.1 本地参考代码定位与版本限制
+
+下表用于代码审查时快速复核“引用是否真实存在”。行号对应 2026-09-04 工作区快照，后续文件修改可能导致漂移，应优先按类名、字段名或方法名检索。
+
+| 证据事项 | 本地定位 | 能够支持的结论 |
+|---|---|---|
+| MAGE 候选预算及候选排序 | `../MAGE-main/src/mage/agent.py:29`、`:139-178` | MAGE 实现多候选生成，并按仿真 mismatch 排序；不能证明本文 StaticScore 权重来自 MAGE |
+| MAGE mismatch 接受/回退 | `../MAGE-main/src/mage/rtl_editor.py:129-135`、`:187-217` | MAGE 记录上一轮 mismatch，并拒绝恶化的编辑；本文 gate/score 双重回滚是进一步改造 |
+| MAGE golden testbench 可见性 | `../MAGE-main/src/mage/tb_generator.py:238-261` | 其特定流程会读取 golden testbench；因此相关结果必须标为 oracle-assisted，不能冒充 specification-only |
+| VerilogCoder 规划与调试编排 | `../VerilogCoder-main/hardware_agent/examples/VerilogCoder/verilogcoder.py` | 支持图式规划、代码生成及仿真反馈调试的来源归属；不支持本文 Router 与 Memory 的归属 |
+| 本项目 Planner | `verilog_agent/agents/planner.py:106`，`RealPlanner` | 已实现的本项目代码，不是外部来源 |
+| 本项目 Generator | `verilog_agent/agents/generator.py:63`，`RealGenerator` | 已实现的本项目代码，不是外部来源 |
+| 本项目静态候选评估 | `verilog_agent/services/candidate_evaluation.py:172`，`StaticCandidateEvaluator` | `[ORIG-SCORE][IMPL]` 当前实现入口 |
+| 本项目 golden-testbench 验证 | `verilog_agent/services/verification.py:38`，`GoldenTestbenchVerificationService` | `[ENG][IMPL]` 当前实现入口 |
+| 本项目 Debugger | `verilog_agent/agents/debugger.py:24`，`RealDebugger` | 改造借鉴机制的当前实现入口 |
+| 本项目 Router | `verilog_agent/services/reflection_router.py:41`，`AdaptiveReflectionRouter` | `[ORIG-ROUTER][IMPL]` 当前实现入口 |
+| 本项目证据驱动 Memory | `verilog_agent/memory/models.py`、`store.py` 与 `consolidate.py` | `[ORIG-MEM][IMPL]`：Design/Error/Repair 三类、角色检索、写入门控、quarantine/supersede 和离线整理已可调用；Project/Human、异步 Consolidation 与独立增益仍待完成 |
+
+工作区中的 `MAGE-main` 与 `VerilogCoder-main` 均为不含 `.git` 元数据的源码快照，当前无法从本地文件证明准确 commit SHA。正式论文复现、发布或答辩归档前，必须从官方仓库固定 tag/commit，记录 SHA、获取日期和许可证；在此之前，只能表述为“基于本地源码快照核验”，不能表述为“基于某一精确提交复现”。
+
+### 29.2 新增机制的来源登记门禁
+
+从 v2.3 起，新增评分特征、门禁、Router 规则、Memory 策略或 benchmark 协议时，PR/ADR 必须记录：
+
+1. `source_type`：论文直接复现、开源代码复现、改造借鉴、通用工程实践或本项目原创假设；
+2. `source_id`：本节文献编号、URL、版本/commit 和具体页码或代码定位；
+3. `evidence_level`：E1-E5；
+4. `delta`：与来源相比改了什么，以及为什么修改；
+5. `license`：是否复制代码/提示词/数据及其许可证兼容性；
+6. `validation`：对应单元测试、回归测试、消融实验或尚待验证状态；
+7. `claim_boundary`：论文、README 和答辩中允许与禁止使用的表述。
+
+缺少上述登记的规则可以进入实验分支，但不得作为“已有研究证明”或“本项目有效创新”写入发布版结论。原创并不意味着可以无依据断言有效：原创机制必须先标为 E4，只有完成预注册或固定协议下的对照实验后，才可凭本项目证据升级为 E5。

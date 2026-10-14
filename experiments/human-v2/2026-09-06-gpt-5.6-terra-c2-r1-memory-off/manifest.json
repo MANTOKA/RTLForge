@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "status": "frozen_historical_record",
+  "experiment_id": "human-v2-2026-09-06-gpt-5.6-terra-c2-r1-memory-off",
+  "purpose": "First complete VerilogEval-Human v2 oracle-assisted closed-loop baseline.",
+  "created_at_utc": "2026-09-06T15:44:07.982825+00:00",
+  "repository": {
+    "name": "MANTOKA/verilog-agent",
+    "commit_at_run": "bb72bbbdfdaa0050bdc2bb7f5c00193231f989f",
+    "commit_resolution": "Resolved as the latest local commit before the recorded run timestamp; the original report did not write Git SHA at launch."
+  },
+  "benchmark": {
+    "name": "VerilogEval-Human-v2",
+    "requested_cases": 156,
+    "dataset_file_count": 471,
+    "dataset_manifest_sha256": "61528dadac1781f94965e83fc4353d15a2f013d409e44cc948bc0303a780be37",
+    "dataset_manifest_definition": "SHA-256 of newline-joined, name-sorted '<filename>\\t<file-sha256>' entries for dataset_dumpall.",
+    "local_dataset_root": "D:/AI/VerilogMulti/VerilogCoder-main/hardware_agent/examples/VerilogCoder/verilog-eval-v2/dataset_dumpall",
+    "oracle_visibility": {
+      "planner_generator": "prompt_only",
+      "debugger": "structured_diagnostics_only",
+      "verification": "golden_testbench_and_reference_black_box"
+    }
+  },
+  "model_and_sampling": {
+    "provider_type": "OpenAI-compatible Responses API",
+    "model": "gpt-5.6-terra",
+    "endpoint": "redacted_not_required_for_reproduction",
+    "temperature": "provider_default_not_recorded",
+    "top_p": "not_recorded",
+    "seed": "not_configured",
+    "max_output_tokens": "not_recorded",
+    "token_usage": "not_recorded",
+    "api_cost": "not_recorded"
+  },
+  "system_configuration": {
+    "candidate_count": 2,
+    "max_repairs": 1,
+    "memory_mode": "off",
+    "docker_image_tag": "verilog-agent-sandbox:reflection",
+    "docker_image_digest": "not_captured_at_run; later local inspection reported sha256:0cb21ab7aa439b645a5765aec15b7f9bbb318b5a355e78543e19f1884948a56b, which is not proof of the historical image",
+    "icarus_version": "11.0 stable (later inspection of same image tag)",
+    "verilator_version": "not_recorded",
+    "yosys_version": "not_recorded"
+  },
+  "result": {
+    "protocol": "oracle_assisted_closed_loop",
+    "total_cases": 156,
+    "evaluable_cases": 154,
+    "pass": 145,
+    "fail": 9,
+    "tool_incompatibility": 2,
+    "pass_rate_evaluable": "145/154 = 94.16%",
+    "pass_rate_all_cases": "145/156 = 92.95%",
+    "sum_of_recorded_phase_timings_ms": 7326265,
+    "wall_clock_duration": "not_recorded"
+  },
+  "evidence": {
+    "full_report_path": "runs/human-v2/gpt-5.6-terra/reports/human_v2_dev10.json",
+    "full_report_sha256": "89bc615bda385976ef2b472655b8d2589c4fe026aab745af141d0886513ed693",
+    "human_readable_report": "docs/HUMAN_V2_TWO_RUN_EVALUATION_REPORT_ZH.md",
+    "per_case_prompt_test_reference_hashes": "Recorded in every result entry of full_report_path."
+  },
+  "follow_up_not_part_of_this_baseline": {
+    "experiment_id": "human-v2-2026-09-06-gpt-5.6-terra-c2-r3-memory-read-write-targeted-retry",
+    "scope": "Targeted rerun of the first baseline's 9 failures; not a second full 156-case run.",
+    "commit_at_run": "a151ef026af9a28cce5aa61e0a69aa76687029de",
+    "report_path": "runs/human-v2/gpt-5.6-terra/reports/human_v2_dev10_repairable_retry.json",
+    "report_sha256": "b8f3abddb66cae15b1b83cf002f3d8e22297a856c48c6a14e0437ffff2fe042f",
+    "candidate_count": 2,
+    "max_repairs": 3,
+    "memory_mode": "read_write",
+    "result": "7/9 = 77.78%; applying its outcomes back to the baseline yields an effective 152/154 = 98.70%, not an independently replicated baseline."
+  },
+  "claim_boundary": [
+    "This record supports a historical engineering baseline under oracle-assisted verification, not specification-only Pass@1.",
+    "It does not establish that Memory, StaticScore, Router, or Debugger individually caused the targeted-retry improvement.",
+    "A future formal run must capture all fields marked not_recorded at launch and use a new immutable experiment directory."
+  ]
+}

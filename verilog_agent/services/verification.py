@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -21,6 +22,16 @@ _CATEGORY_MAP = {
     "INPUT_NOT_FOUND": "SYSTEM_ERROR",
     "UNSUPPORTED_INPUT": "SYSTEM_ERROR",
 }
+
+_OUTPUT_MISMATCH_RE = re.compile(
+    r"^Hint: Output '([A-Za-z_][A-Za-z0-9_$]*)' has (\d+) mismatches\. "
+    r"First mismatch occurred at time (\d+)\.$",
+    re.MULTILINE,
+)
+_TOTAL_MISMATCH_RE = re.compile(
+    r"^Hint: Total mismatched samples is (\d+) out of (\d+) samples$",
+    re.MULTILINE,
+)
 
 
 @dataclass(slots=True)
@@ -80,7 +91,13 @@ class GoldenTestbenchVerificationService:
                 encoding="utf-8",
                 newline="\n",
             )
-            category = _verification_category(result, Path(current.artifact_path))
+            category = _verification_category(
+                result,
+                Path(current.artifact_path),
+                expected_module_name=(
+                    context.spec_ir.module_name if context.spec_ir is not None else None
+                ),
+            )
             attempt = {
                 "candidate_id": candidate_id,
                 "status": result.get("status", "FAIL"),
@@ -172,6 +189,18 @@ class GoldenTestbenchVerificationService:
         )
         context.metadata["verification_report"] = str(summary_path)
         context.metadata["verification_attempts"] = attempts
+        history = context.metadata.setdefault("verification_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    "cycle": len(history) + 1,
+                    "passed": passed,
+                    "category": category,
+                    "selected_candidate_id": selected_candidate_id,
+                    "attempts": attempts,
+                    "evidence_path": str(summary_path),
+                }
+            )
         return VerificationOutcome(
             passed=passed,
             category=category,
@@ -188,6 +217,8 @@ class GoldenTestbenchVerificationService:
 
     @staticmethod
     def _verification_order(context: RTLTaskContext, selected: Candidate) -> list[str]:
+        if context.metadata.get("candidate_policy") == "sequential_repair_first_v1":
+            return [selected.candidate_id]
         configured = context.metadata.get("verification_order", [])
         valid_ids = {candidate.candidate_id for candidate in context.candidates}
         order = [candidate_id for candidate_id in configured if candidate_id in valid_ids]
@@ -196,10 +227,19 @@ class GoldenTestbenchVerificationService:
         return order
 
 
-def _verification_category(result: dict[str, Any], candidate_path: Path) -> str:
+def _verification_category(
+    result: dict[str, Any],
+    candidate_path: Path,
+    expected_module_name: str | None = None,
+) -> str:
     if result.get("status") == "PASS":
         return "OK"
     if result.get("category") == "SYNTAX_ERROR":
+        if expected_module_name and any(
+            f"Unknown module type: {expected_module_name}" in str(error.get("message", ""))
+            for error in result.get("errors", [])
+        ):
+            return "INTERFACE_MISMATCH"
         diagnostic_files = {
             Path(str(error["file"])).name
             for error in result.get("errors", [])
@@ -224,9 +264,48 @@ def _debugger_feedback(result: dict[str, Any], category: str) -> dict[str, Any]:
                 "message": str(error.get("message", ""))[:500],
             }
         )
-    return {
+    feedback = {
         "category": category,
         "tool": result.get("tool"),
         "errors": errors,
         "timed_out": result.get("category") == "TIMEOUT",
     }
+    stdout = str(result.get("stdout", ""))
+    output_mismatches = [
+        {
+            "output": match.group(1),
+            "mismatches": int(match.group(2)),
+            "first_mismatch_time": int(match.group(3)),
+        }
+        for match in _OUTPUT_MISMATCH_RE.finditer(stdout)
+    ][:10]
+    total = _TOTAL_MISMATCH_RE.search(stdout)
+    if output_mismatches or total:
+        reported_total = int(total.group(1)) if total else None
+        observed_total = sum(item["mismatches"] for item in output_mismatches)
+        total_mismatched_samples = reported_total
+        summary: dict[str, Any] = {
+            "outputs": output_mismatches,
+            "total_mismatched_samples": total_mismatched_samples,
+            "total_samples": int(total.group(2)) if total else None,
+        }
+        # Some Human v2 testbenches can report a non-zero per-output count while
+        # their aggregate counter remains zero. Preserve the raw transcript, but
+        # do not let that inconsistent aggregate hide a confirmed failure.
+        if reported_total == 0 and observed_total > 0:
+            summary["total_mismatched_samples"] = observed_total
+            summary["reported_total_mismatched_samples"] = reported_total
+            summary["total_source"] = "sum_of_output_mismatches"
+        if (
+            summary["total_mismatched_samples"] == 1
+            and isinstance(summary["total_samples"], int)
+            and summary["total_samples"] > 1
+            and output_mismatches
+        ):
+            summary["temporal_pattern"] = "isolated_single_sample"
+            summary["diagnostic_focus"] = (
+                "Check initial state, reset assumptions, first-cycle sampling, and "
+                "nonblocking-assignment timing before changing steady-state logic."
+            )
+        feedback["mismatch_summary"] = summary
+    return feedback

@@ -4,7 +4,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
-from verilog_agent.domain import Candidate, RTLTaskContext
+from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
 from verilog_agent.services import DockerToolError, GoldenTestbenchVerificationService
 
 
@@ -117,6 +117,89 @@ def test_verification_returns_best_ranked_failure_for_debugger(tmp_path: Path) -
     assert outcome.details["debugger_feedback"]["category"] == "FUNCTIONAL_MISMATCH"
 
 
+def test_debugger_feedback_includes_sanitized_mismatch_summary(tmp_path: Path) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'done' has 12 mismatches. "
+        "First mismatch occurred at time 210.\n"
+        "Hint: Total mismatched samples is 12 out of 100 samples\n"
+        "private oracle transcript that must not be copied\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    feedback = outcome.details["debugger_feedback"]
+    assert feedback["mismatch_summary"] == {
+        "outputs": [
+            {"output": "done", "mismatches": 12, "first_mismatch_time": 210}
+        ],
+        "total_mismatched_samples": 12,
+        "total_samples": 100,
+    }
+    assert "private oracle transcript" not in json.dumps(feedback)
+
+
+def test_debugger_feedback_uses_output_count_when_total_is_inconsistent(
+    tmp_path: Path,
+) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'q' has 93 mismatches. First mismatch occurred at time 10.\n"
+        "Hint: Total mismatched samples is 0 out of 224 samples\n"
+        "Mismatches: 0 in 224 samples\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    summary = outcome.details["debugger_feedback"]["mismatch_summary"]
+    assert summary["total_mismatched_samples"] == 93
+    assert summary["reported_total_mismatched_samples"] == 0
+    assert summary["total_source"] == "sum_of_output_mismatches"
+
+
+def test_single_sample_mismatch_focuses_debugger_on_initial_timing(
+    tmp_path: Path,
+) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "Hint: Output 'Q' has 1 mismatches. First mismatch occurred at time 5.\n"
+        "Hint: Total mismatched samples is 1 out of 199 samples\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="ASSERTION_FAILURE", stdout=stdout),
+        }
+    )
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    summary = outcome.details["debugger_feedback"]["mismatch_summary"]
+    assert summary["temporal_pattern"] == "isolated_single_sample"
+    assert "initial state" in summary["diagnostic_focus"]
+
+
 def test_verification_stops_on_infrastructure_failure(tmp_path: Path) -> None:
     context, runs_root, testbench = _context(tmp_path)
     service = GoldenTestbenchVerificationService(
@@ -152,6 +235,36 @@ def test_testbench_compile_error_is_infrastructure_not_candidate_syntax(tmp_path
 
     assert outcome.category == "SYSTEM_ERROR"
     assert runner.calls == ["cand_01"]
+
+
+def test_missing_expected_dut_is_interface_mismatch(tmp_path: Path) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    assert context.spec_ir is None
+    context.spec_ir = SpecIR(
+        module_name="counter",
+        raw_spec="counter",
+        ports=[PortSpec("clk", PortDirection.INPUT)],
+    )
+    syntax_result = _result(status="FAIL", category="SYNTAX_ERROR")
+    syntax_result["errors"] = [
+        {
+            "tool": "iverilog",
+            "severity": "ERROR",
+            "type": "ERROR",
+            "file": str(testbench),
+            "line": 7,
+            "message": "Unknown module type: counter",
+        }
+    ]
+    runner = SimulationRunner({"cand_01": syntax_result, "cand_02": syntax_result})
+    service = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    )
+
+    outcome = service.verify(context, context.candidate())
+
+    assert outcome.category == "INTERFACE_MISMATCH"
+    assert runner.calls == ["cand_01", "cand_02"]
 
 
 def _reference(tmp_path: Path) -> Path:

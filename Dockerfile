@@ -1,5 +1,7 @@
 FROM ubuntu:22.04
 
+WORKDIR /work
+
 # 设置环境变量，避免交互式弹窗打断构建
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,7 +28,6 @@ ENV TMPDIR=/work \
     VERILOG_AGENT_INPUT_ROOT=/inputs \
     VERILOG_AGENT_SCORE_CONFIG=/opt/verilog-agent/static_score_v1.json
 
-WORKDIR /work
 USER 10001:10001
 
 CMD ["python3", "-u", "/opt/verilog-agent/tool_wrapper.py"]

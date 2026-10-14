@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
-from verilog_agent.services import DockerEDARunner, DockerToolError, StaticCandidateEvaluator
+from verilog_agent.services import (
+    DockerEDARunner,
+    DockerToolError,
+    StaticCandidateEvaluator,
+    candidate_evaluation,
+)
 
 
 def _tool_result(action: str, *, status: str = "PASS", score: int = 100) -> dict:
@@ -120,6 +125,18 @@ def test_static_evaluator_selects_highest_quality_passing_candidate(tmp_path: Pa
     assert (runs_root / context.task_id / "tool_runs" / "cand_02_interface.json").is_file()
 
 
+def test_sequential_evaluation_does_not_reselect_previous_root(tmp_path: Path) -> None:
+    context, runs_root = _context_with_candidates(tmp_path)
+    context.metadata["candidate_policy"] = "sequential_repair_first_v1"
+    context.selected_candidate_id = "cand_02"
+    runner = RecordingRunner({"cand_01": 100, "cand_02": 80})
+    outcome = StaticCandidateEvaluator(runner, runs_root).evaluate(context)
+    assert outcome.selected_candidate_id == "cand_02"
+    assert outcome.scores == {"cand_02": 80.0}
+    assert context.metadata["verification_order"] == ["cand_02"]
+    assert len(runner.calls) == 3
+
+
 def test_static_evaluator_rejects_candidate_that_fails_a_gate(tmp_path: Path) -> None:
     context, runs_root = _context_with_candidates(tmp_path)
     runner = RecordingRunner(
@@ -188,6 +205,7 @@ def test_below_threshold_candidates_remain_as_verification_fallbacks(tmp_path: P
     assert outcome.accepted is True
     assert outcome.selected_candidate_id == "cand_01"
     assert context.metadata["verification_order"] == ["cand_01", "cand_02"]
+    assert context.metadata["initial_verification_order"] == ["cand_01", "cand_02"]
     assert all(
         candidate.metadata["static_evaluation"]["eligible_for_verification"]
         for candidate in context.candidates
@@ -228,3 +246,48 @@ def test_docker_runner_rejects_unapproved_oracle_path(tmp_path: Path) -> None:
 
     with pytest.raises(DockerToolError, match="read-only roots"):
         runner.run_files("simulate", [unapproved])
+
+
+def test_docker_runner_allows_internal_reference_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = tmp_path / "runs" / "model" / "tasks"
+    runs_root.mkdir(parents=True)
+    reference = runs_root.parent / "reference" / "adapter.sv"
+    reference.parent.mkdir()
+    reference.write_text("module TopModule; endmodule\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object):
+        commands.append(command)
+        return type(
+            "Completed",
+            (),
+            {"returncode": 0, "stdout": '{"action":"simulate"}', "stderr": ""},
+        )()
+
+    monkeypatch.setattr(candidate_evaluation.subprocess, "run", fake_run)
+    runner = DockerEDARunner(runs_root, docker_bin="docker")
+
+    assert runner.run_files("simulate", [reference]) == {"action": "simulate"}
+    assert "/inputs/repo/reference/adapter.sv" in commands[0]
+
+
+def test_docker_runner_discovers_standard_docker_desktop_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = (
+        tmp_path
+        / "Programs"
+        / "DockerDesktop"
+        / "resources"
+        / "bin"
+        / "docker.exe"
+    )
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    monkeypatch.delenv("DOCKER_BIN", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(candidate_evaluation.shutil, "which", lambda _: None)
+
+    assert DockerEDARunner(tmp_path / "runs")._docker_binary() == str(cli)

@@ -1,4 +1,4 @@
-# Real Planner and Generator
+# Real Planner, Generator and Debugger
 
 ## What “real Agent” means here
 
@@ -7,13 +7,16 @@ and local validation. It is not a second Docker container and it does not contro
 The deterministic Orchestrator calls each Agent at the correct state and owns budgets,
 checkpoints, events, cancellation, and failure handling.
 
-This Week 5 slice replaces two test doubles:
+当前实现以三个真实 LLM 角色替换对应 test double：
 
 ```text
 raw requirement
     -> RealPlanner -> validated SpecIR + Task Tree
     -> RealGenerator -> 2-3 distinct RTL files + hashes
-    -> Candidate Evaluation / Verification (still test doubles in the live demo)
+    -> Candidate Evaluation（确定性服务）
+    -> golden-testbench Verification（确定性服务）
+    -> Adaptive Reflection Router（确定性服务）
+    -> RealDebugger（仅失败且预算允许时）
 ```
 
 `RealPlanner` may interpret ambiguous text only when it records the interpretation as an
@@ -85,12 +88,13 @@ Generator), and may consume paid API tokens:
 .\.venv\Scripts\python.exe -m verilog_agent.agents.demo
 ```
 
-You can also pass the requirement in quotes after `demo`. The command prints each stage and
+You can also pass the requirement in quotes after `demo`. Without `--static-evaluation`, this
+general-purpose command stops after planning/generation because it has no user testbench; it
 saves `input.txt`, `spec_ir.json`, `task_tree.json`, `showcase_summary.json`, and candidate RTL
-under `runs/<task_id>/`; `runs/` is ignored by Git.
+under `runs/<task_id>/`. It therefore cannot label RTL functionally verified.
 
-Important: this command proves real planning and generation, not final RTL correctness. It now
-stops at `EVALUATING` immediately after generation and does not invoke a Fake Evaluator or Fake
-Verifier. The report says `verified_rtl=false`. Phase 2 Weeks 6-7 will connect the static scorer,
-EDA verification, failure router, and real Debugger before a generated candidate can be labeled
-verified RTL.
+For a complete controlled path, use the Human v2 single-case command in
+[`HUMAN_V2_SINGLE_AND_BATCH_ZH.md`](HUMAN_V2_SINGLE_AND_BATCH_ZH.md). It supplies only the
+prompt to LLM roles, keeps the golden testbench/reference inside Verification, and can call the
+real Debugger after a structured failure. This is oracle-assisted closed-loop evaluation, not
+specification-only Planner/Generator Pass@1.

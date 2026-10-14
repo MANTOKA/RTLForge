@@ -27,6 +27,53 @@ class FailingResponses:
         raise ConnectionError("upstream disconnected")
 
 
+def test_stream_requires_completed_event(monkeypatch):
+    monkeypatch.setenv("VERILOG_AGENT_RESPONSES_STREAM", "1")
+
+    class StreamResponses:
+        def __init__(self, complete):
+            self.complete = complete
+            self.request = None
+
+        def create(self, **kwargs):
+            self.request = kwargs
+            yield SimpleNamespace(type="response.output_text.delta", delta='{"answer":1}')
+            if self.complete:
+                yield SimpleNamespace(
+                    type="response.completed",
+                    response=SimpleNamespace(status="completed", output_text='{"answer":1}'),
+                )
+
+    for complete in (True, False):
+        responses = StreamResponses(complete)
+        provider = OpenAIResponsesProvider(
+            ProviderSettings(api_key="test", model="configured-model"),
+            client=SimpleNamespace(responses=responses),
+        )
+        def call():
+            return provider.generate_structured(
+                instructions="test", input_text="test", schema_name="answer",
+                schema={"type": "object"},
+            )
+        if complete:
+            assert call() == {"answer": 1}
+        else:
+            with pytest.raises(ModelProviderError, match="without response.completed"):
+                call()
+        assert responses.request["stream"] is True
+
+
+class RecordingCompletions:
+    def __init__(self, content: str | None = '{"answer": 1}') -> None:
+        self.content = content
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        message = SimpleNamespace(content=self.content)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
 def test_provider_sends_strict_non_stored_responses_request() -> None:
     responses = RecordingResponses()
     client = SimpleNamespace(responses=responses)
@@ -45,12 +92,106 @@ def test_provider_sends_strict_non_stored_responses_request() -> None:
     request = responses.calls[0]
     assert request["model"] == "configured-model"
     assert request["store"] is False
+    assert request["temperature"] == 0.1
+    assert request["top_p"] == 1.0
+    assert "seed" not in request
     assert request["text"]["format"] == {
         "type": "json_schema",
         "name": "answer",
         "schema": {"type": "object"},
         "strict": True,
     }
+
+
+def test_responses_reasoning_effort_is_opt_in() -> None:
+    responses = RecordingResponses()
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="test", model="deepseek-v4-pro", reasoning_effort="none"),
+        client=SimpleNamespace(responses=responses),
+    )
+    provider.generate_structured(
+        instructions="test", input_text="test", schema_name="answer",
+        schema={"type": "object"},
+    )
+    assert responses.calls[0]["reasoning"] == {"effort": "none"}
+
+
+def test_dashscope_qwen_uses_chat_completions_json_object() -> None:
+    completions = RecordingCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    settings = ProviderSettings(
+        api_key="top-secret",
+        model="qwen3-coder-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    provider = OpenAIResponsesProvider(settings, client=client)
+
+    result = provider.generate_structured(
+        instructions="Create a plan.",
+        input_text="counter",
+        schema_name="answer",
+        schema={"type": "object"},
+    )
+
+    assert result == {"answer": 1}
+    request = completions.calls[0]
+    assert request["temperature"] == 0.1
+    assert request["top_p"] == 1.0
+    assert request["seed"] == 20261008
+    assert request["model"] == "qwen3-coder-plus"
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["max_completion_tokens"] == 8192
+    assert "JSON" in request["messages"][0]["content"]
+    assert '"type":"object"' in request["messages"][0]["content"]
+
+
+def test_explicit_chat_completions_uses_generic_token_limit() -> None:
+    completions = RecordingCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    settings = ProviderSettings(
+        api_key="top-secret",
+        model="Qwen/Qwen3.5-9B",
+        base_url="https://api.siliconflow.cn/v1",
+        api_style="chat_completions",
+    )
+    provider = OpenAIResponsesProvider(settings, client=client)
+
+    result = provider.generate_structured(
+        instructions="Create a plan.", input_text="counter",
+        schema_name="answer", schema={"type": "object"},
+    )
+
+    assert result == {"answer": 1}
+    request = completions.calls[0]
+    assert request["model"] == "Qwen/Qwen3.5-9B"
+    assert request["max_tokens"] == 8192
+    assert "max_completion_tokens" not in request
+    assert "seed" not in request
+
+
+@pytest.mark.parametrize(
+    "output_text",
+    [
+        '```json\n{"answer": 1}\n```',
+        '```\n{"answer": 1}\n```',
+        '<think>internal reasoning</think>\n{"answer": 1}',
+        '<think>internal reasoning</think>\n```json\n{"answer": 1}\n```',
+    ],
+)
+def test_provider_accepts_known_json_wrappers(output_text: str) -> None:
+    client = SimpleNamespace(responses=RecordingResponses(output_text))
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="secret", model="model"), client=client
+    )
+
+    result = provider.generate_structured(
+        instructions="plan",
+        input_text="counter",
+        schema_name="answer",
+        schema={"type": "object"},
+    )
+
+    assert result == {"answer": 1}
 
 
 @pytest.mark.parametrize("output_text", [None, "", "not-json", "[]"])
@@ -61,6 +202,23 @@ def test_provider_rejects_missing_or_invalid_structured_output(output_text: str 
     )
 
     with pytest.raises(ModelProviderError):
+        provider.generate_structured(
+            instructions="plan",
+            input_text="counter",
+            schema_name="answer",
+            schema={"type": "object"},
+        )
+
+
+def test_provider_rejects_explanatory_text_around_json() -> None:
+    client = SimpleNamespace(
+        responses=RecordingResponses('Here is the result: {"answer": 1}')
+    )
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="secret", model="model"), client=client
+    )
+
+    with pytest.raises(ModelProviderError, match="not valid JSON"):
         provider.generate_structured(
             instructions="plan",
             input_text="counter",

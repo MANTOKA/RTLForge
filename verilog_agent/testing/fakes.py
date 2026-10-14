@@ -56,7 +56,8 @@ class FakeGenerator:
     def generate(self, context: RTLTaskContext, candidate_count: int) -> list[Candidate]:
         candidates = []
         module_name = context.spec_ir.module_name if context.spec_ir else "rtl"
-        for index in range(1, candidate_count + 1):
+        first_index = 1 + sum(candidate.parent_id is None for candidate in context.candidates)
+        for index in range(first_index, first_index + candidate_count):
             candidate_id = f"cand_{index:02d}"
             digest = sha256(f"{context.task_id}:{candidate_id}".encode()).hexdigest()
             candidates.append(

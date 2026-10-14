@@ -18,7 +18,11 @@ failure. Preserve the exact confirmed module interface and all behavior unrelate
 failure. Return the complete patched RTL as plain text in patched_rtl, never Markdown fences.
 Do not create or modify a testbench, oracle, reference implementation, specification, or port.
 You cannot see hidden tests: reason only from the specification, current RTL, reflection policy,
-and sanitized diagnostics. Explain the change, expected impact, and remaining risks."""
+and sanitized diagnostics. Explain the change, expected impact, and remaining risks.
+If prior repair analysis reports no progress, do not repeat an equivalent edit. Change the
+root-cause hypothesis and explain why the new patch should reduce the observed mismatch.
+For an isolated single-sample mismatch, inspect initialization, reset assumptions, and
+first-cycle/nonblocking timing before rewriting steady-state datapath logic."""
 
 
 class RealDebugger:
@@ -56,6 +60,12 @@ class RealDebugger:
                 "failure_category": context.failure_category,
                 "reflection": reflection,
                 "debugger_feedback": feedback,
+                "prior_repair_attempts": context.metadata.get("repair_attempts", [])[-3:],
+                "last_repair_analysis": context.metadata.get("last_repair_analysis"),
+                "candidate_fallback": context.metadata.get("repair_fallback"),
+                "retrieved_memories": context.metadata.get(
+                    "retrieved_memories", []
+                ),
                 "remaining_repair_attempts": (
                     context.budget.max_repairs - context.budget.repair_attempts
                 ),
@@ -64,14 +74,21 @@ class RealDebugger:
             sort_keys=True,
         )
         payload = self.provider.generate_structured(
-            instructions=DEBUGGER_INSTRUCTIONS,
+            instructions=(
+                DEBUGGER_INSTRUCTIONS
+                if context.spec_ir.coding_style_constraint == "legacy_verilog"
+                else DEBUGGER_INSTRUCTIONS
+                + " For strict_sv, keep synthesizable always_ff/always_comb and no DUT initial."
+            ),
             input_text=prompt,
             schema_name="verilog_rtl_repair",
             schema=self._schema(),
         )
         patched_rtl = self._validate_rtl(payload.get("patched_rtl"), context.spec_ir.module_name)
         if patched_rtl == source_rtl:
-            raise AgentOutputError("Debugger returned an unchanged candidate")
+            from verilog_agent.agents.validation import RepairNoProgressError
+
+            raise RepairNoProgressError("Debugger returned an unchanged candidate")
 
         repair_number = context.budget.repair_attempts
         candidate_id = f"cand_repair_{repair_number:02d}"
@@ -127,6 +144,15 @@ class RealDebugger:
             if isinstance(attempt, dict) and attempt.get("candidate_id") == candidate_id:
                 feedback = attempt.get("debugger_feedback", {})
                 return dict(feedback) if isinstance(feedback, dict) else {}
+        history = context.metadata.get("verification_history", [])
+        if isinstance(history, list):
+            for cycle in reversed(history):
+                if not isinstance(cycle, dict):
+                    continue
+                for attempt in cycle.get("attempts", []):
+                    if isinstance(attempt, dict) and attempt.get("candidate_id") == candidate_id:
+                        feedback = attempt.get("debugger_feedback", {})
+                        return dict(feedback) if isinstance(feedback, dict) else {}
         return {}
 
     @staticmethod

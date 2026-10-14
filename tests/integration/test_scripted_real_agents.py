@@ -16,7 +16,9 @@ from verilog_agent.testing import (
 
 
 def test_real_agent_classes_complete_offline_scripted_loop(tmp_path: Path) -> None:
-    provider = ScriptedProvider(counter_plan_payload(), counter_candidate_payload())
+    provider = ScriptedProvider(
+        counter_plan_payload(), {"candidates": counter_candidate_payload()["candidates"][:1]}
+    )
     store = SQLiteTaskStore(tmp_path / "real-agents.sqlite")
     orchestrator = Orchestrator(
         planner=RealPlanner(provider),
@@ -36,5 +38,5 @@ def test_real_agent_classes_complete_offline_scripted_loop(tmp_path: Path) -> No
 
     assert result.current_stage is TaskStage.COMPLETED
     assert len(provider.requests) == 2
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == 1
     assert all(Path(candidate.artifact_path).is_file() for candidate in result.candidates)

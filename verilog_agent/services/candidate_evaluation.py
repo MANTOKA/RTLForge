@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -58,8 +59,11 @@ class DockerEDARunner:
             target = ""
             try:
                 relative = resolved_input.relative_to(host_root.parent)
-                if resolved_input.is_relative_to(host_root):
-                    matched_root = host_root
+                internal_reference_root = host_root.parent / "reference"
+                if resolved_input.is_relative_to(host_root) or resolved_input.is_relative_to(
+                    internal_reference_root
+                ):
+                    matched_root = host_root.parent
                     target = "/inputs/repo"
             except ValueError:
                 relative = Path()
@@ -148,6 +152,23 @@ class DockerEDARunner:
         discovered = shutil.which("docker")
         if discovered:
             return discovered
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            desktop_cli = (
+                Path(local_app_data)
+                / "Programs"
+                / "DockerDesktop"
+                / "resources"
+                / "bin"
+                / "docker.exe"
+            )
+            try:
+                if desktop_cli.is_file():
+                    return str(desktop_cli)
+            except PermissionError:
+                # A restricted parent process may be allowed to execute Docker while
+                # being unable to stat the Docker Desktop installation directory.
+                return str(desktop_cli)
         raise DockerToolError("Docker CLI was not found; set DOCKER_BIN to docker.exe")
 
 
@@ -173,7 +194,9 @@ class StaticCandidateEvaluator:
         candidates = context.candidates
         if context.selected_candidate_id is not None:
             selected = context.candidate()
-            if selected.parent_id is not None:
+            if selected.parent_id is not None or context.metadata.get("candidate_policy") == (
+                "sequential_repair_first_v1"
+            ):
                 candidates = [selected]
 
         for candidate in candidates:
@@ -234,6 +257,10 @@ class StaticCandidateEvaluator:
             ),
         )
         context.metadata["verification_order"] = [item.candidate_id for item in ranked]
+        if all(item.parent_id is None for item in candidates):
+            context.metadata["initial_verification_order"] = [
+                item.candidate_id for item in ranked
+            ]
         context.metadata["static_evaluation_report"] = str(report_path)
         selected = ranked[0]
         return EvaluationOutcome(True, selected.candidate_id, scores=scores)
@@ -251,8 +278,10 @@ class StaticCandidateEvaluator:
     @staticmethod
     def _failure_category(report: dict[str, Any]) -> str:
         results = report.get("results", {})
-        for action in ("interface", "compile", "lint", "eval_quality"):
+        for action in ("interface", "coding_style", "compile", "lint", "eval_quality"):
             result = results.get(action, {})
+            if action == "coding_style" and not result:
+                continue
             if result.get("status") != "PASS":
                 return str(result.get("category") or "SYSTEM_ERROR")
         return "QUALITY_ERROR"
@@ -285,6 +314,22 @@ class StaticCandidateEvaluator:
                 gate_stage="PATH_VALIDATED",
                 reason="interface gate failed",
             )
+
+        if spec_ir.coding_style_constraint == "strict_sv":
+            source = re.sub(
+                r"//[^\n]*|/\*.*?\*/", "", path.read_text(encoding="utf-8"),
+                flags=re.DOTALL,
+            )
+            if re.search(r"\binitial\b", source):
+                results["coding_style"] = {
+                    "status": "FAIL",
+                    "category": "QUALITY_ERROR",
+                    "errors": ["strict_sv forbids initial blocks in DUT"],
+                }
+                return self._report(
+                    candidate_id, results, accepted=False, hard_gates_passed=False,
+                    gate_stage="INTERFACE_PASSED", reason="strict_sv coding style failed",
+                )
 
         try:
             for action in ("lint", "compile", "eval_quality"):

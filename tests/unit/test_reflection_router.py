@@ -15,6 +15,17 @@ def test_router_selects_specialized_debugger_policies() -> None:
     assert timeout.action is ReflectionAction.DEBUG
 
 
+def test_router_specializes_isolated_single_sample_mismatch() -> None:
+    decision = AdaptiveReflectionRouter().route(
+        "FUNCTIONAL_MISMATCH",
+        {"mismatch_summary": {"temporal_pattern": "isolated_single_sample"}},
+    )
+
+    assert decision.category == "INITIAL_STATE_MISMATCH"
+    assert decision.policy is ReflectionPolicy.FUNCTIONAL
+    assert "initial-state" in decision.reason
+
+
 def test_router_never_sends_infrastructure_failures_to_debugger() -> None:
     decision = AdaptiveReflectionRouter().route("TOOL_INCOMPATIBILITY")
 

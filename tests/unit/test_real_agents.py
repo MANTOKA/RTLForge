@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 from pathlib import Path
 
@@ -64,6 +65,19 @@ def test_real_planner_builds_valid_domain_plan() -> None:
     assert provider.requests[0]["schema_name"] == "verilog_requirement_plan"
 
 
+def test_real_planner_honors_required_module_name_metadata() -> None:
+    provider = ScriptedProvider(counter_plan_payload())
+    context = RTLTaskContext(
+        task_id="task_benchmark_plan",
+        raw_spec="Create a four-bit counter",
+        metadata={"required_module_name": "TopModule"},
+    )
+
+    result = RealPlanner(provider).plan(context)
+
+    assert result.spec_ir.module_name == "TopModule"
+
+
 def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
     payload = counter_plan_payload()
     payload["clock"] = "q"
@@ -77,8 +91,15 @@ def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
 def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> None:
     provider = ScriptedProvider(counter_candidate_payload())
     generator = RealGenerator(provider, artifacts=ArtifactRepository(tmp_path / "runs"))
+    context = planned_context()
+    context.metadata["retrieved_design_patterns"] = [
+        {
+            "memory_id": "mem_pattern",
+            "recommended_action": "Use an explicit terminal-count branch.",
+        }
+    ]
 
-    candidates = generator.generate(planned_context(), 2)
+    candidates = generator.generate(context, 2)
 
     assert [candidate.candidate_id for candidate in candidates] == ["cand_01", "cand_02"]
     assert candidates[0].code_hash != candidates[1].code_hash
@@ -90,6 +111,10 @@ def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> Non
     schema = provider.requests[0]["schema"]
     assert schema["properties"]["candidates"]["minItems"] == 2
     assert schema["properties"]["candidates"]["maxItems"] == 2
+    request = json.loads(provider.requests[0]["input_text"])
+    assert request["retrieved_verified_design_patterns"][0]["memory_id"] == (
+        "mem_pattern"
+    )
 
 
 def test_real_generator_rejects_duplicates_before_writing(tmp_path: Path) -> None:
@@ -103,6 +128,25 @@ def test_real_generator_rejects_duplicates_before_writing(tmp_path: Path) -> Non
         generator.generate(planned_context(), 2)
 
     assert not (tmp_path / "runs").exists()
+
+
+def test_sequential_generator_preserves_first_artifact_and_rejects_repeated_rtl(tmp_path):
+    payload = counter_candidate_payload()["candidates"]
+    generator = RealGenerator(
+        ScriptedProvider(*({"candidates": [item]} for item in [*payload, payload[0]])),
+        artifacts=ArtifactRepository(tmp_path / "runs"),
+    )
+    context = planned_context()
+    first = generator.generate(context, 1)[0]
+    context.candidates.append(first)
+    original = Path(first.artifact_path).read_bytes()
+    second = generator.generate(context, 1)[0]
+    context.candidates.append(second)
+    assert second.candidate_id == "cand_02"
+    assert Path(first.artifact_path).read_bytes() == original
+    with pytest.raises(AgentOutputError, match="duplicate"):
+        generator.generate(context, 1)
+    assert not (tmp_path / "runs" / context.task_id / "candidates" / "cand_03").exists()
 
 
 def test_artifact_repository_rejects_unsafe_task_path(tmp_path: Path) -> None:

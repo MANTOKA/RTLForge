@@ -55,6 +55,25 @@ def _context(tmp_path: Path) -> tuple[RTLTaskContext, Candidate, Path]:
             },
         }
     ]
+    context.metadata["repair_attempts"] = [
+        {
+            "candidate_id": "cand_repair_00",
+            "mismatch_reduction": 0,
+            "rationale": "An earlier threshold edit made no progress.",
+        }
+    ]
+    context.metadata["last_repair_analysis"] = {
+        "no_progress": True,
+        "before_mismatches": 12,
+        "after_mismatches": 12,
+    }
+    context.metadata["retrieved_memories"] = [
+        {
+            "memory_id": "mem_counter",
+            "applicability_conditions": "counter boundary mismatch",
+            "recommended_action": "Re-check the wrap threshold.",
+        }
+    ]
     return context, candidate, runs
 
 
@@ -87,6 +106,9 @@ def test_real_debugger_writes_child_candidate_and_auditable_diff(tmp_path: Path)
     assert "q <= q + 1'b1" in patch
     request = json.loads(provider.requests[0]["input_text"])
     assert request["debugger_feedback"]["tool"] == "vvp"
+    assert request["prior_repair_attempts"][0]["mismatch_reduction"] == 0
+    assert request["last_repair_analysis"]["no_progress"] is True
+    assert request["retrieved_memories"][0]["memory_id"] == "mem_counter"
     assert "test.sv" not in provider.requests[0]["input_text"]
     assert "ref.sv" not in provider.requests[0]["input_text"]
 

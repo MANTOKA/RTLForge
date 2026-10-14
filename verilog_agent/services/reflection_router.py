@@ -80,6 +80,15 @@ class AdaptiveReflectionRouter:
                 "Repair declarations, types, widths, assignments, or interface conformance.",
             )
         if normalized in self._FUNCTIONAL:
+            mismatch = (feedback or {}).get("mismatch_summary", {})
+            if mismatch.get("temporal_pattern") == "isolated_single_sample":
+                return ReflectionDecision(
+                    "INITIAL_STATE_MISMATCH",
+                    ReflectionPolicy.FUNCTIONAL,
+                    ReflectionAction.DEBUG,
+                    "Repair initial-state or first-cycle timing semantics before changing "
+                    "steady-state behavior.",
+                )
             return ReflectionDecision(
                 normalized,
                 ReflectionPolicy.FUNCTIONAL,

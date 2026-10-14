@@ -73,21 +73,38 @@ class RealGenerator:
     def generate(self, context: RTLTaskContext, candidate_count: int) -> list[Candidate]:
         if context.spec_ir is None or context.task_tree_root is None:
             raise AgentOutputError("Generator requires a completed Planner result")
-        if not 2 <= candidate_count <= 3:
-            raise AgentOutputError("real Generator requires two or three candidates")
+        if not 1 <= candidate_count <= 3:
+            raise AgentOutputError("real Generator requires one to three candidates")
 
         schema = self._schema(candidate_count)
         prompt = json.dumps(
             {
                 "candidate_count": candidate_count,
+                "previous_design_patterns": [
+                    candidate.design_pattern for candidate in context.candidates
+                    if candidate.parent_id is None
+                ],
+                "generation_instruction": (
+                    "Generate a fresh independent implementation, not a patch."
+                ),
                 "spec_ir": context.spec_ir.to_dict(),
                 "task_tree_root": context.task_tree_root.to_dict(),
+                "test_objectives": context.metadata.get("generated_test_objectives", []),
+                "retrieved_verified_design_patterns": context.metadata.get(
+                    "retrieved_design_patterns", []
+                ),
             },
             ensure_ascii=False,
             sort_keys=True,
         )
         payload = self.provider.generate_structured(
-            instructions=GENERATOR_INSTRUCTIONS,
+            instructions=(
+                GENERATOR_INSTRUCTIONS
+                if context.spec_ir.coding_style_constraint == "legacy_verilog"
+                else GENERATOR_INSTRUCTIONS
+                + " For strict_sv, use synthesizable SystemVerilog always_ff/always_comb, "
+                "never use initial blocks in DUT, and avoid inferred latches."
+            ),
             input_text=prompt,
             schema_name="verilog_rtl_candidates",
             schema=schema,
@@ -100,7 +117,7 @@ class RealGenerator:
             )
 
         prepared: list[tuple[str, str, list[str], str]] = []
-        seen_hashes: set[str] = set()
+        seen_hashes: set[str] = {candidate.code_hash for candidate in context.candidates}
         for index, raw_candidate in enumerate(raw_candidates, start=1):
             if not isinstance(raw_candidate, dict):
                 raise AgentOutputError(f"candidates[{index - 1}] must be an object")
@@ -118,7 +135,10 @@ class RealGenerator:
             prepared.append((rtl, design_pattern.strip(), assumptions, digest))
 
         candidates = []
-        for index, (rtl, design_pattern, assumptions, digest) in enumerate(prepared, start=1):
+        first_index = 1 + sum(candidate.parent_id is None for candidate in context.candidates)
+        for index, (rtl, design_pattern, assumptions, digest) in enumerate(
+            prepared, start=first_index
+        ):
             candidate_id = f"cand_{index:02d}"
             path = self.artifacts.write_candidate(
                 context.task_id,
