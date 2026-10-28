@@ -8,11 +8,12 @@ import pytest
 
 from rtlforge import console, providers
 from rtlforge.testing import ScriptedProvider, counter_candidate_payload, counter_plan_payload
+from tests.integration.test_docker_wrapper import docker_image as docker_image
 from tests.unit.test_integration_entry import module_fixture
 
 
 @pytest.mark.integration
-def test_generic_menu_pipeline_real_docker(tmp_path, monkeypatch):
+def test_generic_menu_pipeline_real_docker(tmp_path, monkeypatch, docker_image):
     modules = [module_fixture(tmp_path / f"source{index}", f"reusable_counter{index}")[1]
                for index in range(3)]
     monkeypatch.setattr(console, "ROOT", tmp_path)
@@ -49,6 +50,7 @@ endmodule
     monkeypatch.setattr(providers, "OpenAIResponsesProvider", lambda _: provider)
     console.run_requirement("Reuse an existing counter as a top", console.Settings(
         env_file=str(env), candidates=1, max_repairs=0, memory_mode="off",
+        docker_image=docker_image,
     ), tb, modules=modules)
     source = next((tmp_path / "runs").rglob("context.json"))
     state = json.loads(source.read_text(encoding="utf-8"))
