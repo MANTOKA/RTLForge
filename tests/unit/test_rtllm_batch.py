@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.benchmarks.rtllm import RTLLMCase
-from verilog_agent.benchmarks.rtllm_batch import (
+from rtlforge.benchmarks.rtllm import RTLLMCase
+from rtlforge.benchmarks.rtllm_batch import (
     _initial_report,
     _is_transient_error,
     _markdown_report,
@@ -14,7 +14,7 @@ from verilog_agent.benchmarks.rtllm_batch import (
     _validate_resume,
     _write_reports,
 )
-from verilog_agent.providers import ProviderSettings
+from rtlforge.providers import ProviderSettings
 
 
 def _settings() -> ProviderSettings:

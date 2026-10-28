@@ -1,0 +1,7 @@
+实现可综合 SystemVerilog 模块 counter。
+固定端口 input clk, input rst, output logic [3:0] q，无参数、无使能、无握手。
+在 clk 上升沿工作。rst 为高有效同步复位：rst=1 的上升沿后 q=0，复位优先。
+rst=0 的每个上升沿后 q=(上一周期q+1) mod16。
+输出在同一采样沿的 NBA 更新后有效，不增加额外周期。
+复位前q未定义；正常使用前至少保持rst=1跨过一个上升沿。
+禁止DUT initial、锁存器、多驱动、外部IP和文件依赖。

@@ -1,5 +1,7 @@
 # Real Planner, Generator and Debugger
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## What “real Agent” means here
 
 An Agent is a role implementation with its own instructions, input contract, output schema,
@@ -48,13 +50,13 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Set `OPENAI_API_KEY`, `VERILOG_AGENT_MODEL`, and, for a compatible relay,
+Set `OPENAI_API_KEY`, `RTLFORGE_MODEL`, and, for a compatible relay,
 `OPENAI_BASE_URL` in `.env`. The relay URL must be a base URL such as
 `https://provider.example/v1`, not the full `/responses` endpoint. Values already present in the
 shell take precedence. Validate the effective non-secret configuration without an API call:
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --check-config
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo --check-config
 ```
 
 Do not paste the real key into `.env.example`, Git, an Issue, a screenshot, or chat.
@@ -71,7 +73,7 @@ validation, artifact writing, hashing, and the Orchestrator loop without network
 To see the actual Planner/Generator display rather than only the test count, run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --offline-example
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo --offline-example
 ```
 
 This uses a fixed, clearly labeled scripted counter response. It displays the same SpecIR,
@@ -85,7 +87,7 @@ The following command prompts for a requirement, calls the configured model twic
 Generator), and may consume paid API tokens:
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo
 ```
 
 You can also pass the requirement in quotes after `demo`. Without `--static-evaluation`, this

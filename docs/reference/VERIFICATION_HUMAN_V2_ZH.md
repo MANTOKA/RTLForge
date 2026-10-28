@@ -1,5 +1,7 @@
 # Verification Service 与 Human v2 基线
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## 已实现的验证边界
 
 Candidate Evaluation 只负责排序。Verification Service 按 `verification_order` 依次运行候选：
@@ -21,7 +23,7 @@ SYSTEM_ERROR -> 停止，不调用 Debugger
 testbench。适配文件只写入忽略版本控制的 `runs/human-v2/reference/reference_adapters/`，不会修改原数据集。
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.verilogeval `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.verilogeval `
   --dataset-root "data\benchmarks\verilog-eval-human-v2" `
   --preflight-reference --summary-only
 ```
@@ -36,12 +38,12 @@ testbench。适配文件只写入忽略版本控制的 `runs/human-v2/reference/
 排除工具不兼容后的 154 题结果。
 
 若 Docker Hub 暂时不可访问，但本地已有包含完整 EDA 工具链的镜像，可通过
-`VERILOG_AGENT_TEST_IMAGE` 复用本地镜像运行集成测试；CI 默认仍从标准 Dockerfile 构建：
+`RTLFORGE_TEST_IMAGE` 复用本地镜像运行集成测试；CI 默认仍从标准 Dockerfile 构建：
 
 ```powershell
-$env:VERILOG_AGENT_TEST_IMAGE = "verilog-agent-sandbox:verification-local"
+$env:RTLFORGE_TEST_IMAGE = "rtlforge-sandbox:verification-local"
 .\.venv\Scripts\python.exe -m pytest --run-integration -m integration -q
-Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
+Remove-Item Env:RTLFORGE_TEST_IMAGE
 ```
 
 ## 单题真实闭环
@@ -49,7 +51,7 @@ Remove-Item Env:VERILOG_AGENT_TEST_IMAGE
 下面的命令会调用真实 Planner/Generator，产生两个候选、静态排序，再运行该题 golden testbench：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.single_case_demo `
   --human-v2-root "data\benchmarks\verilog-eval-human-v2" `
   --human-v2-case Prob001_zero `
   --static-evaluation `

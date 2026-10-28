@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verilog_agent.benchmarks.human_v2_batch import (
+from rtlforge.benchmarks.human_v2_batch import (
     _default_output,
     _markdown_report,
     _metrics,
@@ -10,8 +10,8 @@ from verilog_agent.benchmarks.human_v2_batch import (
     _result_from_summary,
     _terminal_result,
 )
-from verilog_agent.benchmarks.verilogeval import human_v2_run_root
-from verilog_agent.providers import ProviderSettings
+from rtlforge.benchmarks.verilogeval import human_v2_run_root
+from rtlforge.providers import ProviderSettings
 
 
 def test_human_v2_artifacts_are_grouped_by_dataset_and_model() -> None:

@@ -1,12 +1,14 @@
 # RTLLM 2.1 单题与批量评测
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 > 数据目录：`data/benchmarks/rtllm-2.1`
 >
 > 数据规模：50 个设计，分为 Arithmetic、Control、Memory、Miscellaneous 四类
 
 ## 1. 数据与可见性边界
 
-适配器入口为 `verilog_agent/benchmarks/rtllm.py`。每题读取：
+适配器入口为 `rtlforge/benchmarks/rtllm.py`。每题读取：
 
 - `design_description.txt`：唯一允许 Planner、Generator 看到的输入；
 - `testbench.v`：仅 Verification 使用；
@@ -20,14 +22,14 @@ RTLLM 参考 RTL 的顶层模块经常带 `verified_` 前缀。适配器从描�
 只检查 50 题目录、文件和模块名，不调用模型或 Docker：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.rtllm
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.rtllm
 ```
 
 用 Docker/Icarus 预检官方参考；可先用 `--limit 1`，确认后再去掉限制：
 
 ```powershell
 $env:DOCKER_BIN = "C:\Users\16872\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.rtllm `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.rtllm `
   --preflight-reference --limit 1 --summary-only
 ```
 
@@ -38,7 +40,7 @@ RTLLM testbench 原本面向 VCS。参考预检不通过时必须区分 RTL/测�
 
 ```powershell
 $env:DOCKER_BIN = "C:\Users\16872\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.rtllm_demo `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.rtllm_demo `
   --case adder_8bit `
   --static-evaluation `
   --candidates 2 `
@@ -52,7 +54,7 @@ Router/Debugger。产物写入 `runs/rtllm-2.1/<model>/tasks/<task_id>/`。
 只检查 API 配置而不调用模型：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.rtllm_demo `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.rtllm_demo `
   --case adder_8bit --check-config
 ```
 
@@ -62,7 +64,7 @@ Router/Debugger。产物写入 `runs/rtllm-2.1/<model>/tasks/<task_id>/`。
 
 ```powershell
 $env:DOCKER_BIN = "C:\Users\16872\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.rtllm_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.rtllm_batch `
   --limit 1 `
   --candidates 2 `
   --max-repairs 2 `

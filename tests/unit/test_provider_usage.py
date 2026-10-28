@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from verilog_agent.domain import RTLTaskContext, TaskStage
-from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
-from verilog_agent.providers import ModelProviderError, OpenAIResponsesProvider, ProviderSettings
-from verilog_agent.providers.usage import RecordingProvider, model_call_task, summarize_calls
-from verilog_agent.testing import (
+from rtlforge.domain import RTLTaskContext, TaskStage
+from rtlforge.orchestration import Orchestrator, SQLiteTaskStore
+from rtlforge.providers import ModelProviderError, OpenAIResponsesProvider, ProviderSettings
+from rtlforge.providers.usage import RecordingProvider, model_call_task, summarize_calls
+from rtlforge.testing import (
     FakeDebugger,
     FakeEvaluator,
     FakeGenerator,

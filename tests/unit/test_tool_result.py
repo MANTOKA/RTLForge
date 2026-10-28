@@ -19,7 +19,7 @@ REQUIRED_KEYS = {
 def test_unknown_action_uses_tool_result_contract(tmp_path, monkeypatch) -> None:
     rtl = tmp_path / "design.v"
     rtl.write_text("module design; endmodule\n", encoding="utf-8")
-    monkeypatch.setenv("VERILOG_AGENT_INPUT_ROOT", str(tmp_path))
+    monkeypatch.setenv("RTLFORGE_INPUT_ROOT", str(tmp_path))
 
     result = tool_wrapper.dispatch("unknown", [str(rtl)])
 

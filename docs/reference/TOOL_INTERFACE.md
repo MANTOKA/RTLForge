@@ -1,5 +1,7 @@
 # Deterministic tool interface
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 `tool_wrapper.py` is the only command contract the later orchestrator and agents should
 depend on. EDA-specific text remains available in `stdout` and `stderr`, but decisions use
 the stable JSON fields below.

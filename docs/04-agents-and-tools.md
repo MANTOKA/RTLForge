@@ -1,15 +1,25 @@
-# 04 · Agent、工具与沙盒
+# 04 · Agent与工具
 
-| 角色 | 当前状态 | M1 读写边界 |
-|---|---|---|
-| Planner | 已接旧入口 | 读需求和授权参考摘要；写冻结的 Design Contract；不得写 RTL/TB 或运行 EDA |
-| Testbench Agent | 已接 M1 新入口 | 只读契约，写生成 TB；不看 DUT 与 hidden golden TB |
-| RTL Coder | 已接旧入口 | 读契约和测试目标摘要；写 RTL；不看完整 TB，不运行 EDA |
-| Verifier | 已接旧入口的确定性服务 | 内部读取 DUT、生成 TB、必要时 golden TB；通过 Docker 网关调用 EDA；不调用 LLM 或改写 RTL |
-| Debugger | 已接旧入口 | 读契约、当前 RTL、精简失败反例和授权 Memory；写新 RTL 候选；不看 golden TB |
+| 组件 | 当前职责与权限 |
+|---|---|
+| Planner | 需求/参考摘要/冻结合同 → SpecIR、TaskTree；缺少关键语义先提问，不写RTL |
+| Generator | 合同、任务树、允许的Memory → 候选；集成时只生成顶层，不读独立TB |
+| TB Agent | 无独立TB时依据合同生成测试；不看DUT实现；测试本身不是oracle |
+| Debugger | 依据观察选择诊断、当前RTL、分类Memory、综合报告、修复、提问或停止 |
+| 执行器/Verifier | 校验动作与预算，运行工具，保存原始证据，裁剪反馈并判断结果 |
 
-M1 的 Planner 在用户显式传入 `--reference-file` 时，可请求一次 `read_file` 或 `list_dir`；工具层只读取白名单文件、截断长内容并记录调用。没有授权文件时不发生工具调用。Debugger 仍只消费现有 Verifier 提供的结构化摘要，尚未提供模型自主读取日志的工具。模型没有原始 shell 或任意路径写权限。VCD 专用 `read_waveform_summary` 在 M2 才开放。
+Planner v2合同包含clock_edge、reset_polarity/reset_kind、signal_timing、handshakes、parameters。
+0周期钟沿输出表示同一采样沿NBA之后可见；未知语义不会由名称猜测。
+非法合同允许自动纠正一次，仍不合法终止为PLANNER_OUTPUT_ERROR；拒绝输出保留证据。
+Planner参考调查只对显式白名单文件开放，多轮读取有次数、行数和字符预算，不是联网RAG。
 
-现有 [DockerEDARunner](../verilog_agent/services/candidate_evaluation.py) 执行 `docker run --rm`，禁网、只读根与输入挂载、限制 CPU/内存/PID/超时；容器内 [tool_wrapper.py](../tool_wrapper.py) 提供 `compile`、`lint`、`simulate`、`eval_quality`、`benchmark` 并返回统一 JSON。RTL/TB 和审计证据可以保存在宿主机；EDA 程序只在容器内运行。详细字段见[工具接口](reference/TOOL_INTERFACE.md)。
+Icarus编译/仿真、Verilator lint/评分、Yosys benchmark通过DockerEDARunner调用本地TOOL，
+不需要包装为MCP。Docker禁网、只读、非root，具有CPU/内存/PID及超时限制。
+ToolResult统一记录action/status/category/metrics/errors；模型不能执行任意shell。
 
-设置 `LANGSMITH_TRACING=true` 与密钥后，LangGraph 节点、结构化模型调用和 Planner 只读工具会进入 LangSmith 追踪；默认关闭。模型提示词可能包含用户需求、授权参考片段或候选 RTL，开启前应确认可上传；隐藏 golden TB 正文与参考 RTL 仍不传给模型。
+Vivado使用官方MCP Server。约束/脚本由执行器生成，模型只读结构化反馈或提出受控综合动作。
+它是可选工具协议接入，不等于所有Agent动作都必须改用MCP。
+当前没有自动加载AMD知识库、Ross Skills/Design Examples，也没有专门的波形摘要动作。
+
+Debugger可定向检索REPAIR_STRATEGY、ERROR_PATTERN、PROJECT，读取源码绑定的综合报告，
+或在功能检查有效且动作获准时请求run_synthesis。所有修复都创建新候选并重新验证。

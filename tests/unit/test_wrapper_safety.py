@@ -11,7 +11,7 @@ def test_validate_input_rejects_path_escape(tmp_path: Path, monkeypatch) -> None
     allowed.mkdir()
     outside = tmp_path / "outside.v"
     outside.write_text("module outside; endmodule\n", encoding="utf-8")
-    monkeypatch.setenv("VERILOG_AGENT_INPUT_ROOT", str(allowed))
+    monkeypatch.setenv("RTLFORGE_INPUT_ROOT", str(allowed))
 
     files, error = tool_wrapper.validate_input_files([str(outside)])
 

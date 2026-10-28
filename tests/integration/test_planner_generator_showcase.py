@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.agents import PlannerGeneratorShowcase
-from verilog_agent.agents.showcase import ShowcaseRunError
-from verilog_agent.services import (
+from rtlforge.agents import PlannerGeneratorShowcase
+from rtlforge.agents.showcase import ShowcaseRunError
+from rtlforge.services import (
     GoldenTestbenchVerificationService,
     StaticCandidateEvaluator,
 )
-from verilog_agent.testing import (
+from rtlforge.testing import (
     OFFLINE_COUNTER_SPEC,
     ScriptedProvider,
     counter_candidate_payload,
@@ -94,7 +94,7 @@ def test_showcase_exposes_plan_tree_candidates_and_event_trace(tmp_path: Path) -
 
 def test_failed_planner_preserves_call_record_and_task_id(tmp_path):
     showcase = PlannerGeneratorShowcase(
-        provider=ScriptedProvider({}), provider_label="offline invalid plan",
+        provider=ScriptedProvider({}, {}), provider_label="offline invalid plan",
         database=tmp_path / "tasks.sqlite", runs_root=tmp_path / "runs",
         emit=lambda _: None,
     )
@@ -102,10 +102,12 @@ def test_failed_planner_preserves_call_record_and_task_id(tmp_path):
         showcase.run(OFFLINE_COUNTER_SPEC)
     error = raised.value
     assert error.task_id is not None
-    assert len(error.model_calls) == 1
-    assert error.model_calls[0]["role"] == "planner"
+    assert len(error.model_calls) == 2
+    assert all(call["role"] == "planner" for call in error.model_calls)
     path = tmp_path / "runs" / error.task_id / "model_calls.jsonl"
-    assert json.loads(path.read_text(encoding="utf-8")) == error.model_calls[0]
+    assert [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] == (
+        error.model_calls
+    )
 
 
 def test_showcase_can_stop_after_real_static_candidate_selection(tmp_path: Path) -> None:

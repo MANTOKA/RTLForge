@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.benchmarks.rtllm import (
+from rtlforge.benchmarks.rtllm import (
     adapt_rtllm_reference,
     load_rtllm,
     rtllm_run_root,

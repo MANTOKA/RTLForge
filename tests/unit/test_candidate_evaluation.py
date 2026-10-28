@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
-from verilog_agent.services import (
+from rtlforge.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
+from rtlforge.services import (
     DockerEDARunner,
     DockerToolError,
     StaticCandidateEvaluator,

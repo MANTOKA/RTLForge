@@ -1,7 +1,7 @@
 schema_version = 1
 
 [sandbox]
-image = "verilog-agent-sandbox"
+image = "rtlforge-sandbox"
 network = "none"
 read_only_root = true
 workdir = "/work"
@@ -29,7 +29,7 @@ provider = "openai_responses"
 model = ""
 base_url = ""
 request_timeout_seconds = 120
-max_output_tokens = 8192
+max_output_tokens = 32768
 max_retries = 2
 
 [logging]

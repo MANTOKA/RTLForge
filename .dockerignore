@@ -5,6 +5,8 @@
 __pycache__
 *.pyc
 .pytest_cache
+.pytest_tmp*
+.ruff_cache
 .venv
 venv
 *.egg-info
@@ -14,3 +16,7 @@ sim.out
 *.fst
 obj_dir
 runs
+memory_data
+work
+tmp
+.Xil

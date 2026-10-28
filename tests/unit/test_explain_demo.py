@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.benchmarks.explain_demo import (
+from rtlforge.benchmarks.explain_demo import (
     _find_recorded_defect,
     _find_recorded_repair,
     _find_summary,

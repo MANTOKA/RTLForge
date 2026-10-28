@@ -1,5 +1,7 @@
 # Phase 2 domain and orchestration baseline
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## What the domain model means
 
 The domain layer is the shared vocabulary of the product. `SpecIR` records a structured

@@ -4,8 +4,8 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
-from verilog_agent.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
-from verilog_agent.services import DockerToolError, GoldenTestbenchVerificationService
+from rtlforge.domain import Candidate, PortDirection, PortSpec, RTLTaskContext, SpecIR
+from rtlforge.services import DockerToolError, GoldenTestbenchVerificationService
 
 
 def _result(*, status: str, category: str, stdout: str = "") -> dict:
@@ -146,6 +146,30 @@ def test_debugger_feedback_includes_sanitized_mismatch_summary(tmp_path: Path) -
         "total_samples": 100,
     }
     assert "private oracle transcript" not in json.dumps(feedback)
+
+
+def test_debugger_feedback_identifies_completion_timeout_without_oracle_text(
+    tmp_path: Path,
+) -> None:
+    context, runs_root, testbench = _context(tmp_path)
+    stdout = (
+        "FATAL: /private/golden_tb.sv:20: completion timeout/protocol\n"
+        "private oracle transcript that must not be copied\n"
+    )
+    runner = SimulationRunner(
+        {
+            "cand_01": _result(status="FAIL", category="SIMULATION_ERROR", stdout=stdout),
+            "cand_02": _result(status="FAIL", category="SIMULATION_ERROR", stdout=stdout),
+        }
+    )
+    outcome = GoldenTestbenchVerificationService(
+        runner, runs_root, lambda _context: testbench
+    ).verify(context, context.candidate())
+
+    feedback = outcome.details["debugger_feedback"]
+    assert feedback["protocol_failure"] == "completion_timeout"
+    assert "counter width" in feedback["diagnostic_focus"]
+    assert "private" not in json.dumps(feedback)
 
 
 def test_debugger_feedback_uses_output_count_when_total_is_inconsistent(

@@ -111,7 +111,7 @@ def parse_error(tool: str, stderr: str) -> list[dict[str, Any]]:
 
 def load_score_config() -> dict[str, Any]:
     """Load a versioned quality configuration without adding runtime dependencies."""
-    configured = os.environ.get("VERILOG_AGENT_SCORE_CONFIG")
+    configured = os.environ.get("RTLFORGE_SCORE_CONFIG")
     candidates = [Path(configured)] if configured else []
     candidates.extend(
         [
@@ -169,7 +169,7 @@ def score_diagnostics(
 
 
 def _timeout(name: str, default: int) -> int:
-    raw_value = os.environ.get(f"VERILOG_AGENT_{name.upper()}_TIMEOUT", str(default))
+    raw_value = os.environ.get(f"RTLFORGE_{name.upper()}_TIMEOUT", str(default))
     try:
         value = int(raw_value)
     except ValueError:
@@ -304,12 +304,12 @@ def _classify_command_failure(
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
     temp_root = os.environ.get("TMPDIR")
-    return tempfile.TemporaryDirectory(prefix="verilog-agent-", dir=temp_root)
+    return tempfile.TemporaryDirectory(prefix="rtlforge-", dir=temp_root)
 
 
 def validate_input_files(files: list[str]) -> tuple[list[str], dict[str, Any] | None]:
     """Resolve RTL inputs and reject files outside the configured read-only input root."""
-    root = Path(os.environ.get("VERILOG_AGENT_INPUT_ROOT", os.getcwd())).resolve()
+    root = Path(os.environ.get("RTLFORGE_INPUT_ROOT", os.getcwd())).resolve()
     resolved_files = []
 
     for raw_file in files:

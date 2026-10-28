@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.domain import (
+from rtlforge.domain import (
     Budget,
     Candidate,
     EvaluationOutcome,
@@ -12,9 +12,9 @@ from verilog_agent.domain import (
     TaskStage,
     VerificationOutcome,
 )
-from verilog_agent.memory import SQLiteMemoryStore
-from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
-from verilog_agent.testing import (
+from rtlforge.memory import SQLiteMemoryStore
+from rtlforge.orchestration import Orchestrator, SQLiteTaskStore
+from rtlforge.testing import (
     FakeDebugger,
     FakeEvaluator,
     FakeGenerator,
@@ -86,7 +86,7 @@ def test_repair_budget_exhaustion_fails_and_rolls_back(tmp_path: Path) -> None:
 
     assert result.current_stage is TaskStage.FAILED
     assert result.failure_category == "BUDGET_EXHAUSTED"
-    assert result.selected_candidate_id == "cand_02"
+    assert result.selected_candidate_id == "cand_01"
     event_types = _event_types(orchestrator.store, result.task_id)
     assert EventType.PATCH_ROLLED_BACK in event_types
     assert EventType.BUDGET_EXHAUSTED in event_types
@@ -232,7 +232,7 @@ def _functional_attempt(candidate_id: str, mismatches: int) -> dict:
     }
 
 
-def test_no_progress_repair_generates_fresh_candidate(
+def test_no_progress_repair_uses_remaining_repairs_before_regeneration(
     tmp_path: Path,
 ) -> None:
     debugger = _TrackingDebugger()
@@ -255,12 +255,35 @@ def test_no_progress_repair_generates_fresh_candidate(
     result = orchestrator.run_task(context.task_id)
 
     assert result.current_stage is TaskStage.COMPLETED
-    assert debugger.parent_ids == ["cand_01"]
-    assert result.selected_candidate_id == "cand_02"
-    assert result.budget.generated_candidates == 2
-    assert result.metadata["candidate_regenerations"][0]["reason"] == "repair made no progress"
+    assert debugger.parent_ids == ["cand_01", "cand_01"]
+    assert result.selected_candidate_id == "cand_repair_02"
+    assert result.budget.generated_candidates == 1
+    assert not result.metadata.get("candidate_regenerations")
     assert result.metadata["repair_attempts"][0]["mismatch_reduction"] == 0
-    assert len(result.metadata["repair_attempts"]) == 1
+    assert len(result.metadata["repair_attempts"]) == 2
+
+
+@pytest.mark.parametrize("before, after, expected_no_progress", [
+    (60, 60, True), (60, 55, True), (10, 60, False),
+])
+def test_static_quality_repair_progress_uses_score_delta(
+    tmp_path: Path, before: int, after: int, expected_no_progress: bool,
+) -> None:
+    orchestrator = _orchestrator(tmp_path / "static_progress.sqlite")
+    context = orchestrator.create_task("counter")
+    parent = Candidate("cand_01", "unused.v", "parent")
+    child = Candidate("cand_repair_01", "unused.v", "child", parent_id="cand_01")
+    parent.metadata["static_evaluation"] = {"quality_score": before}
+    child.metadata["static_evaluation"] = {"quality_score": after}
+    context.candidates = [parent, child]
+    context.failure_category = "QUALITY_ERROR"
+
+    analysis = orchestrator._repair_progress(context, child)
+
+    assert analysis["before_static_score"] == before
+    assert analysis["after_static_score"] == after
+    assert analysis["static_score_gain"] == after - before
+    assert analysis["no_progress"] is expected_no_progress
 
 
 @pytest.mark.parametrize("score, roots", [(74, 2), (75, 1), (100, 1)])
@@ -283,20 +306,18 @@ def test_static_threshold_controls_sequential_generation(tmp_path, score, roots)
 
 
 @pytest.mark.parametrize("cap", [1, 2, 3])
-def test_candidate_cap_is_enforced_without_resetting_repair_budget(tmp_path, cap):
+def test_repair_exhaustion_does_not_spend_unused_candidate_slots(tmp_path, cap):
     orchestrator = _orchestrator(tmp_path / "cap.sqlite", FakeVerifier(always_fail=True))
     context = orchestrator.create_task("counter", budget=Budget(max_candidates=cap, max_repairs=1))
     result = orchestrator.run_task(context.task_id)
     assert result.current_stage is TaskStage.FAILED
-    assert result.budget.generated_candidates == cap
+    assert result.budget.generated_candidates == 1
     assert result.budget.repair_attempts == 1
-    assert [c.candidate_id for c in result.candidates if c.parent_id is None] == [
-        f"cand_{i:02d}" for i in range(1, cap + 1)
-    ]
+    assert [c.candidate_id for c in result.candidates if c.parent_id is None] == ["cand_01"]
 
 
-def test_unchanged_debugger_output_generates_second_candidate(tmp_path):
-    from verilog_agent.agents.validation import RepairNoProgressError
+def test_unchanged_debugger_output_exhausts_repairs_without_regeneration(tmp_path):
+    from rtlforge.agents.validation import RepairNoProgressError
 
     class Debugger(FakeDebugger):
         def repair(self, context, candidate):
@@ -306,11 +327,81 @@ def test_unchanged_debugger_output_generates_second_candidate(tmp_path):
         tmp_path / "unchanged.sqlite", FakeVerifier(failures_before_pass=1)
     )
     orchestrator.debugger = Debugger()
-    context = orchestrator.create_task("counter")
+    context = orchestrator.create_task(
+        "counter", budget=Budget(max_candidates=2, max_repairs=1)
+    )
     result = orchestrator.run_task(context.task_id)
-    assert result.current_stage is TaskStage.COMPLETED
-    assert result.selected_candidate_id == "cand_02"
+    assert result.current_stage is TaskStage.FAILED
+    assert result.failure_category == "BUDGET_EXHAUSTED"
+    assert result.budget.generated_candidates == 1
     assert result.budget.repair_attempts == 1
+
+
+def test_unchanged_debugger_retries_with_remaining_repair_budget(tmp_path):
+    from rtlforge.agents.validation import RepairNoProgressError
+
+    class Debugger(FakeDebugger):
+        calls = 0
+
+        def repair(self, context, candidate):
+            self.calls += 1
+            if self.calls == 1:
+                raise RepairNoProgressError("Debugger returned an unchanged candidate")
+            assert context.metadata["last_repair_analysis"]["reason"] == "unchanged_rtl"
+            return super().repair(context, candidate)
+
+    orchestrator = _orchestrator(
+        tmp_path / "unchanged_retry.sqlite", FakeVerifier(failures_before_pass=1)
+    )
+    debugger = Debugger()
+    orchestrator.debugger = debugger
+    context = orchestrator.create_task(
+        "counter", budget=Budget(max_candidates=1, max_repairs=2)
+    )
+    result = orchestrator.run_task(context.task_id)
+
+    assert result.current_stage is TaskStage.COMPLETED
+    assert result.budget.repair_attempts == 2
+    assert debugger.calls == 2
+    assert result.selected_candidate_id == "cand_repair_02"
+
+
+def test_unchanged_functional_repair_preserves_no_progress_for_next_prompt(tmp_path):
+    from rtlforge.agents.validation import RepairNoProgressError
+
+    class Evaluator(FakeEvaluator):
+        def evaluate(self, context):
+            if context.selected_candidate_id == "cand_01":
+                return EvaluationOutcome(True, "cand_01", scores={"cand_01": 70})
+            return super().evaluate(context)
+
+    class Debugger(FakeDebugger):
+        calls = 0
+
+        def repair(self, context, candidate):
+            self.calls += 1
+            if self.calls == 2:
+                raise RepairNoProgressError("Debugger returned an unchanged candidate")
+            if self.calls == 3:
+                analysis = context.metadata["last_repair_analysis"]
+                assert analysis["reason"] == "unchanged_rtl"
+                assert analysis["candidate_id"] == candidate.candidate_id
+            return super().repair(context, candidate)
+
+    orchestrator = _orchestrator(
+        tmp_path / "unchanged_functional.sqlite", FakeVerifier(failures_before_pass=1)
+    )
+    orchestrator.evaluator = Evaluator()
+    debugger = Debugger()
+    orchestrator.debugger = debugger
+    context = orchestrator.create_task(
+        "counter", budget=Budget(max_candidates=1, max_repairs=3)
+    )
+
+    result = orchestrator.run_task(context.task_id)
+
+    assert result.current_stage is TaskStage.COMPLETED
+    assert debugger.calls == 3
 
 
 def test_resume_at_regeneration_keeps_candidate_number_and_budget(tmp_path):
