@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from verilog_agent.benchmarks.human_v2_compare import compare_reports
+from rtlforge.benchmarks.human_v2_compare import compare_reports
 
 
 def _report(model: str, statuses: list[str]) -> dict:

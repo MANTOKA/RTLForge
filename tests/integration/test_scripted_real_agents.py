@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verilog_agent.agents import ArtifactRepository, RealGenerator, RealPlanner
-from verilog_agent.domain import TaskStage
-from verilog_agent.orchestration import Orchestrator, SQLiteTaskStore
-from verilog_agent.testing import (
+from rtlforge.agents import ArtifactRepository, RealGenerator, RealPlanner
+from rtlforge.domain import TaskStage
+from rtlforge.orchestration import Orchestrator, SQLiteTaskStore
+from rtlforge.testing import (
     FakeDebugger,
     FakeEvaluator,
     FakeVerifier,

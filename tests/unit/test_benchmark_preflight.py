@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from verilog_agent.benchmarks.preflight import preflight_references
-from verilog_agent.benchmarks.verilogeval import load_human_v2
+from rtlforge.benchmarks.preflight import preflight_references
+from rtlforge.benchmarks.verilogeval import load_human_v2
 
 
 class ReferenceRunner:

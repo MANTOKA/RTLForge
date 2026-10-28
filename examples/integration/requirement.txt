@@ -1,0 +1,7 @@
+生成可综合 SystemVerilog 顶层 counter_wrapper，复用集成入口选择的已验证 counter 模块。
+固定端口 input clk, input rst, output [3:0] q，无参数。
+将clk、rst和q直接连接到冻结counter实例，不能修改、重写或重新定义counter。
+接口行为与counter相同：clk上升沿工作，高有效同步复位，rst=1的上升沿后q=0，
+rst=0的每个上升沿后q=(旧q+1) mod16，同一采样沿NBA更新后可见，无额外寄存器延迟。
+复位前q未定义；正常使用前至少保持rst=1跨过一个上升沿。
+无使能、握手、跨时钟、外部IP、文件或DUT initial。

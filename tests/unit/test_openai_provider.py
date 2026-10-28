@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from verilog_agent.providers import (
+from rtlforge.providers import (
     ModelProviderError,
     OpenAIResponsesProvider,
     ProviderConfigurationError,
@@ -27,8 +27,39 @@ class FailingResponses:
         raise ConnectionError("upstream disconnected")
 
 
+def test_provider_reports_incomplete_response_before_parsing() -> None:
+    class IncompleteResponses:
+        def create(self, **_kwargs):
+            return SimpleNamespace(
+                output_text='{"answer":', status="incomplete",
+                incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+            )
+
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="test", model="model"),
+        client=SimpleNamespace(responses=IncompleteResponses()),
+    )
+    with pytest.raises(ModelProviderError, match="response incomplete.*max_output_tokens"):
+        provider.generate_structured(
+            instructions="plan", input_text="test", schema_name="answer",
+            schema={"type": "object"},
+        )
+
+
+def test_provider_reports_json_error_location() -> None:
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="test", model="model"),
+        client=SimpleNamespace(responses=RecordingResponses('{"answer":')),
+    )
+    with pytest.raises(ModelProviderError, match="line=1, column=11, position=10"):
+        provider.generate_structured(
+            instructions="plan", input_text="test", schema_name="answer",
+            schema={"type": "object"},
+        )
+
+
 def test_stream_requires_completed_event(monkeypatch):
-    monkeypatch.setenv("VERILOG_AGENT_RESPONSES_STREAM", "1")
+    monkeypatch.setenv("RTLFORGE_RESPONSES_STREAM", "1")
 
     class StreamResponses:
         def __init__(self, complete):
@@ -140,7 +171,7 @@ def test_dashscope_qwen_uses_chat_completions_json_object() -> None:
     assert request["seed"] == 20261008
     assert request["model"] == "qwen3-coder-plus"
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_completion_tokens"] == 8192
+    assert request["max_completion_tokens"] == 32768
     assert "JSON" in request["messages"][0]["content"]
     assert '"type":"object"' in request["messages"][0]["content"]
 
@@ -164,7 +195,7 @@ def test_explicit_chat_completions_uses_generic_token_limit() -> None:
     assert result == {"answer": 1}
     request = completions.calls[0]
     assert request["model"] == "Qwen/Qwen3.5-9B"
-    assert request["max_tokens"] == 8192
+    assert request["max_tokens"] == 32768
     assert "max_completion_tokens" not in request
     assert "seed" not in request
 
@@ -227,6 +258,39 @@ def test_provider_rejects_explanatory_text_around_json() -> None:
         )
 
 
+def test_provider_recovers_only_complete_fenced_debugger_rtl() -> None:
+    rtl = "module counter(input clk, output reg q); always @(posedge clk) q <= ~q; endmodule"
+    client = SimpleNamespace(responses=RecordingResponses(f"```verilog\n{rtl}\n```"))
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="secret", model="model"), client=client
+    )
+
+    result = provider.generate_structured(
+        instructions="repair", input_text="counter",
+        schema_name="verilog_rtl_repair", schema={"type": "object"},
+    )
+
+    assert result["patched_rtl"] == rtl
+    assert result["_format_fallback"] == "fenced_verilog_repair"
+    with pytest.raises(ModelProviderError, match="not valid JSON"):
+        provider.generate_structured(
+            instructions="plan", input_text="counter",
+            schema_name="plan", schema={"type": "object"},
+        )
+
+
+def test_provider_rejects_incomplete_fenced_debugger_rtl() -> None:
+    client = SimpleNamespace(responses=RecordingResponses("```verilog\nmodule counter;\n```"))
+    provider = OpenAIResponsesProvider(
+        ProviderSettings(api_key="secret", model="model"), client=client
+    )
+    with pytest.raises(ModelProviderError, match="not valid JSON"):
+        provider.generate_structured(
+            instructions="repair", input_text="counter",
+            schema_name="verilog_rtl_repair", schema={"type": "object"},
+        )
+
+
 def test_provider_wraps_transport_failure_as_model_provider_error() -> None:
     client = SimpleNamespace(responses=FailingResponses())
     provider = OpenAIResponsesProvider(
@@ -244,15 +308,15 @@ def test_provider_wraps_transport_failure_as_model_provider_error() -> None:
 
 def test_settings_require_key_and_model_and_accept_zero_retries() -> None:
     with pytest.raises(ProviderConfigurationError, match="OPENAI_API_KEY"):
-        ProviderSettings.from_env({"VERILOG_AGENT_MODEL": "model"})
-    with pytest.raises(ProviderConfigurationError, match="VERILOG_AGENT_MODEL"):
+        ProviderSettings.from_env({"RTLFORGE_MODEL": "model"})
+    with pytest.raises(ProviderConfigurationError, match="RTLFORGE_MODEL"):
         ProviderSettings.from_env({"OPENAI_API_KEY": "secret"})
 
     settings = ProviderSettings.from_env(
         {
             "OPENAI_API_KEY": "secret",
-            "VERILOG_AGENT_MODEL": "model",
-            "VERILOG_AGENT_MAX_RETRIES": "0",
+            "RTLFORGE_MODEL": "model",
+            "RTLFORGE_MAX_RETRIES": "0",
         }
     )
 

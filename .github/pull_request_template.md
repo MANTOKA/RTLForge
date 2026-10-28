@@ -18,6 +18,6 @@ Closes #
 ## Safety and repository hygiene
 
 - [ ] No secrets, generated RTL, logs, waveforms, or build products are committed.
-- [ ] Untrusted RTL/testbench execution remains inside the restricted sandbox.
+- [ ] Icarus/Verilator/Yosys retain sandbox limits; optional Vivado uses executor-generated Tcl.
 - [ ] Documentation and default configuration were updated when behavior changed.
 - [ ] The change is scoped and can be rolled back independently.

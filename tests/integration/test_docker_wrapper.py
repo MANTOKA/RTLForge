@@ -10,7 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
-IMAGE = "verilog-agent-sandbox:test"
+IMAGE = "rtlforge-sandbox:test"
 
 
 def _docker_binary() -> str:
@@ -39,7 +39,7 @@ def _run(command: list[str], *, timeout: int = 300) -> subprocess.CompletedProce
 
 @pytest.fixture(scope="session")
 def docker_image() -> str:
-    existing_image = os.environ.get("VERILOG_AGENT_TEST_IMAGE")
+    existing_image = os.environ.get("RTLFORGE_TEST_IMAGE")
     if existing_image:
         return existing_image
     docker = _docker_binary()
@@ -65,7 +65,7 @@ def _sandbox_command(docker_image: str) -> list[str]:
         "--env",
         "TMPDIR=/work",
         "--env",
-        "VERILOG_AGENT_INPUT_ROOT=/repo/tests/fixtures",
+        "RTLFORGE_INPUT_ROOT=/repo/tests/fixtures",
         "--pids-limit",
         "128",
         "--memory",
@@ -213,7 +213,7 @@ def test_input_outside_allowed_root_is_rejected(docker_image: str) -> None:
         docker_image,
         "compile",
         "human_v2_prob035/TopModule.v",
-        environment={"VERILOG_AGENT_INPUT_ROOT": "/repo/tests/unit"},
+        environment={"RTLFORGE_INPUT_ROOT": "/repo/tests/unit"},
     )
 
     assert result["status"] == "FAIL"
@@ -226,7 +226,7 @@ def test_infinite_simulation_times_out(docker_image: str) -> None:
         docker_image,
         "simulate",
         "tb_timeout.v",
-        environment={"VERILOG_AGENT_SIMULATE_TIMEOUT": "1"},
+        environment={"RTLFORGE_SIMULATE_TIMEOUT": "1"},
     )
 
     assert result["status"] == "FAIL"

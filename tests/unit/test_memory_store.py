@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verilog_agent.memory import RepairAttempt, SQLiteMemoryStore
+import pytest
+
+from rtlforge.memory import MemoryItem, RepairAttempt, SQLiteMemoryStore
 
 
 def _attempt(
@@ -183,3 +185,49 @@ def test_refined_repair_strategy_supersedes_generic_copy(tmp_path: Path) -> None
         item["module_family"]: item["status"] for item in store.list_memories()
     }
     assert strategies == {"generic_rtl": "SUPERSEDED", "flip_flop": "ACTIVE"}
+
+
+def test_manual_intervention_is_archived_but_not_retrieved(tmp_path: Path) -> None:
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite", toolchain_version="test")
+    item = MemoryItem(
+        memory_id="mem_manual_test",
+        memory_type="HUMAN_INTERVENTION",
+        summary="Check finite-width signed state transitions.",
+        error_signature="FUNCTIONAL_MISMATCH signed_state",
+        module_family="rs_kes",
+        applicability_conditions="Only for equivalent signed-width state updates.",
+        recommended_action="Derive the two's-complement expression before coding.",
+        source_task_id="rs_test",
+        source_candidate_id="manual_copy",
+        source_problem_id="RS272257",
+        before_score=None,
+        after_score=None,
+        verification_gate_reached="FUNCTIONAL_VERIFIED",
+        toolchain_version="test",
+        evidence_hashes=["a" * 64],
+        status="EVIDENCE_ONLY",
+        provenance={
+            "source_repository": "local-project",
+            "source_commit": "abc123",
+            "license": "not-established",
+            "operator": "codex_assistant_manual",
+            "human_authored": False,
+            "verification_command": "test command",
+            "verification_result": "PASS",
+            "failure_signature": "signed_state",
+            "patch_hash": "b" * 64,
+        },
+    )
+
+    store.record_human_intervention(item)
+    store.record_human_intervention(item)
+    assert len(store.list_memories()) == 1
+    assert store.list_memories()[0]["provenance"]["human_authored"] is False
+    assert store.retrieve(
+        error_signature="signed_state", module_family="rs_kes",
+        exclude_problem_id="another_problem",
+        memory_types=("HUMAN_INTERVENTION",),
+    ) == []
+
+    with pytest.raises(ValueError):
+        store.record_human_intervention(MemoryItem(**{**item.to_dict(), "provenance": {}}))

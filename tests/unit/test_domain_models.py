@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from verilog_agent.domain import Budget, PortDirection, PortSpec, RTLTaskContext, SpecIR
-from verilog_agent.domain.models import BudgetExceeded
+from rtlforge.domain import Budget, PortDirection, PortSpec, RTLTaskContext, SpecIR
+from rtlforge.domain.models import BudgetExceeded
 
 
 def test_task_context_round_trip_preserves_typed_domain_data() -> None:

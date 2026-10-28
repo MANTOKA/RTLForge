@@ -1,5 +1,7 @@
 # Docker 候选静态评审
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## 目的与边界
 
 这个阶段把生成的每个 RTL 候选交给确定性的 Docker EDA 沙盒，而不是让 LLM 自己宣称“通过”。
@@ -24,20 +26,20 @@ benchmark 校准的初始假设，不是已经证明的研究结论。
 先确认 Docker Desktop 正在运行，并且已经有本地沙盒镜像：
 
 ```powershell
-docker image inspect verilog-agent-sandbox:latest
+docker image inspect rtlforge-sandbox:latest
 ```
 
 无需模型调用的两候选演示：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo `
   --offline-example --static-evaluation
 ```
 
 真实 Planner/Generator，加三候选评审：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo `
   --static-evaluation --candidates 3
 ```
 

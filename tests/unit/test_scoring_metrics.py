@@ -1,6 +1,6 @@
 import pytest
 
-from verilog_agent.evaluation import ScoredCandidateObservation, summarize_scoring
+from rtlforge.evaluation import ScoredCandidateObservation, summarize_scoring
 
 
 def test_scoring_metrics_compare_score_order_with_generation_order() -> None:

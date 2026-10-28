@@ -1,4 +1,4 @@
-from verilog_agent.memory.consolidate import _has_clean_functional_pass
+from rtlforge.memory.consolidate import _has_clean_functional_pass
 
 
 def _summary(mismatches: int) -> tuple[dict, list[dict]]:

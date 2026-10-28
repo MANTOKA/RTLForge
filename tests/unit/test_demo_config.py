@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.agents.demo import _load_provider_environment, _print_provider_config
-from verilog_agent.providers import ProviderSettings
+from rtlforge.agents.demo import _load_provider_environment, _print_provider_config
+from rtlforge.providers import ProviderSettings
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -19,11 +19,11 @@ def test_demo_loads_private_env_file_without_printing_or_returning_secret(
     env_file = tmp_path / ".env"
     env_file.write_text(
         "OPENAI_API_KEY=private-secret\n"
-        "VERILOG_AGENT_MODEL=relay-model\n"
+        "RTLFORGE_MODEL=relay-model\n"
         "OPENAI_BASE_URL=https://relay.example/v1\n",
         encoding="utf-8",
     )
-    for name in ("OPENAI_API_KEY", "VERILOG_AGENT_MODEL", "OPENAI_BASE_URL"):
+    for name in ("OPENAI_API_KEY", "RTLFORGE_MODEL", "OPENAI_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
 
     loaded_path = _load_provider_environment(_parser(), env_file)
@@ -41,11 +41,11 @@ def test_shell_environment_takes_precedence_over_env_file(
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "OPENAI_API_KEY=file-key\nVERILOG_AGENT_MODEL=file-model\n",
+        "OPENAI_API_KEY=file-key\nRTLFORGE_MODEL=file-model\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("OPENAI_API_KEY", "shell-key")
-    monkeypatch.setenv("VERILOG_AGENT_MODEL", "shell-model")
+    monkeypatch.setenv("RTLFORGE_MODEL", "shell-model")
 
     _load_provider_environment(_parser(), env_file)
 

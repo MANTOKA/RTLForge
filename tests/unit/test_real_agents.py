@@ -6,15 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.agents import AgentOutputError, ArtifactRepository, RealGenerator, RealPlanner
-from verilog_agent.domain import (
+from rtlforge.agents import AgentOutputError, ArtifactRepository, RealGenerator, RealPlanner
+from rtlforge.agents.testbench import RealTestbenchGenerator
+from rtlforge.domain import (
     PortDirection,
     PortSpec,
     RTLTaskContext,
     SpecIR,
     TaskTreeNode,
 )
-from verilog_agent.testing import (
+from rtlforge.testing import (
     ScriptedProvider,
     counter_candidate_payload,
     counter_plan_payload,
@@ -78,14 +79,128 @@ def test_real_planner_honors_required_module_name_metadata() -> None:
     assert result.spec_ir.module_name == "TopModule"
 
 
+def test_planner_preserves_suggested_clarification_answers() -> None:
+    payload = counter_plan_payload()
+    payload["clarification_options"] = ["同步高有效复位", "异步高有效复位"]
+    context = RTLTaskContext(task_id="task_options", raw_spec="counter")
+    RealPlanner(ScriptedProvider(payload)).plan(context)
+    assert context.metadata["clarification_options"] == payload["clarification_options"]
+
+
 def test_real_planner_rejects_clock_that_is_not_an_input() -> None:
     payload = counter_plan_payload()
     payload["clock"] = "q"
 
     with pytest.raises(AgentOutputError, match="clock must name a declared input"):
-        RealPlanner(ScriptedProvider(payload)).plan(
+        RealPlanner(ScriptedProvider(payload, payload)).plan(
             RTLTaskContext(task_id="task_bad_plan", raw_spec="counter")
         )
+
+
+def test_contract_testbench_request_has_bounded_advisory_scope() -> None:
+    provider = ScriptedProvider({
+        "testbench": (
+            "module tb; initial begin if (1'b0 !== 1'b0) $fatal(1,\"bad\"); "
+            "$display(\"GENERATED_TB_PASS\"); $finish; end endmodule"
+        ),
+        "test_objectives": ["Check reset"],
+    })
+
+    RealTestbenchGenerator(provider).generate_for_contract(planned_context().spec_ir)
+
+    instructions = provider.requests[0]["instructions"]
+    assert "at most 200 source lines" in instructions
+    assert "3 to 5 directed scenarios" in instructions
+    assert "full reference algorithm" in instructions
+    assert "derive exact expected outputs from the contract" in instructions
+    assert "never reuse reset or no-error expected outputs" in instructions
+    assert "advisory" in instructions
+    assert "locator=1 is only the zero-error locator" not in instructions
+
+
+def test_rs_bm_contract_testbench_disallows_nonzero_zero_error_locator() -> None:
+    provider = ScriptedProvider({
+        "testbench": (
+            "module tb; initial begin if (1'b0 !== 1'b0) $fatal(1,\"bad\"); "
+            "$display(\"GENERATED_TB_PASS\"); $finish; end endmodule"
+        ),
+        "test_objectives": ["Check BM handshake"],
+    })
+    contract = planned_context().spec_ir
+    contract.module_name = "rs_kes_bm"
+
+    RealTestbenchGenerator(provider).generate_for_contract(contract)
+
+    instructions = provider.requests[0]["instructions"]
+    assert "locator=1 is only the zero-error locator" in instructions
+    assert "test protocol properties instead of guessing exact values" in instructions
+
+
+def test_rs_bm_contract_testbench_retries_obvious_wrong_locator() -> None:
+    def payload(locator: str) -> dict:
+        return {
+            "testbench": (
+                "module tb; initial begin\n"
+                "run_case(140'h0, 80'h1, 70'h0);\n"
+                f"run_case({{14{{10'h001}}}}, {locator}, 70'h1);\n"
+                "if (1'b0 !== 1'b0) $fatal(1,\"bad\");\n"
+                "$display(\"GENERATED_TB_PASS\"); $finish; end endmodule"
+            ),
+            "test_objectives": ["Check BM outputs"],
+        }
+
+    provider = ScriptedProvider(payload("80'h1"), payload("80'h401"))
+    contract = planned_context().spec_ir
+    contract.module_name = "rs_kes_bm"
+
+    source, _ = RealTestbenchGenerator(provider).generate_for_contract(contract)
+
+    assert len(provider.requests) == 2
+    assert "previous TB used an inconsistent RS locator expectation" in (
+        provider.requests[1]["instructions"]
+    )
+    assert "80'h401" in source
+
+
+def test_rs_bm_contract_testbench_rejects_repeated_wrong_locator() -> None:
+    bad = {
+        "testbench": (
+            "module tb; initial begin run_case({14{10'h001}}, 80'h1, 70'h1); "
+            "if (1'b0 !== 1'b0) $fatal(1,\"bad\"); "
+            "$display(\"GENERATED_TB_PASS\"); $finish; end endmodule"
+        ),
+        "test_objectives": ["Check BM outputs"],
+    }
+    provider = ScriptedProvider(bad, bad)
+    contract = planned_context().spec_ir
+    contract.module_name = "rs_kes_bm"
+
+    with pytest.raises(AgentOutputError, match="inconsistent locator"):
+        RealTestbenchGenerator(provider).generate_for_contract(contract)
+
+    assert len(provider.requests) == 2
+
+
+def test_rs_bm_contract_testbench_retries_wrong_locator_constant_term() -> None:
+    bad = {
+        "testbench": (
+            "module tb; initial begin if (locator !== 80'h3) $fatal(1,\"bad\"); "
+            "$display(\"GENERATED_TB_PASS\"); $finish; end endmodule"
+        ),
+        "test_objectives": ["Check BM output"],
+    }
+    good = {
+        "testbench": bad["testbench"].replace("80'h3", "80'h401"),
+        "test_objectives": bad["test_objectives"],
+    }
+    provider = ScriptedProvider(bad, good)
+    contract = planned_context().spec_ir
+    contract.module_name = "rs_kes_bm"
+
+    source, _ = RealTestbenchGenerator(provider).generate_for_contract(contract)
+
+    assert len(provider.requests) == 2
+    assert "80'h401" in source
 
 
 def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> None:
@@ -112,9 +227,12 @@ def test_real_generator_writes_hashed_distinct_candidates(tmp_path: Path) -> Non
     assert schema["properties"]["candidates"]["minItems"] == 2
     assert schema["properties"]["candidates"]["maxItems"] == 2
     request = json.loads(provider.requests[0]["input_text"])
-    assert request["retrieved_verified_design_patterns"][0]["memory_id"] == (
+    assert request["retrieved_memory_guidance"][0]["memory_id"] == (
         "mem_pattern"
     )
+    assert "worst-case cycles" in provider.requests[0]["instructions"]
+    assert "2^m-2 serial multiplications" in provider.requests[0]["instructions"]
+    assert "loop counter reaches its terminal value" in provider.requests[0]["instructions"]
 
 
 def test_real_generator_rejects_duplicates_before_writing(tmp_path: Path) -> None:

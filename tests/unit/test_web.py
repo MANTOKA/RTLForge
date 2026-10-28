@@ -7,10 +7,10 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from verilog_agent.web.artifacts import ArtifactIndex
-from verilog_agent.web.comparison import compare
-from verilog_agent.web.server import Handler, WebError, Workbench
-from verilog_agent.web.views import classify
+from rtlforge.web.artifacts import ArtifactIndex
+from rtlforge.web.comparison import compare
+from rtlforge.web.server import Handler, WebError, Workbench
+from rtlforge.web.views import classify
 
 
 def _fixture(tmp_path):
@@ -151,7 +151,7 @@ def test_task_parameter_allowlist_and_recovery(tmp_path, monkeypatch):
     recovered = next(row for row in workbench.history()["benchmarks"]
                      if row["id"] == "run_old")
     assert recovered["run_time"] == "2026-10-08T05:19:07+00:00"
-    (repo / ".env").write_text("VERILOG_AGENT_MODEL=test-model\nOPENAI_API_KEY=test\n",
+    (repo / ".env").write_text("RTLFORGE_MODEL=test-model\nOPENAI_API_KEY=test\n",
                               encoding="utf-8")
     monkeypatch.setattr(workbench, "settings", lambda profile=".env": {
         "configured": True, "model": "test-model"})
@@ -168,14 +168,15 @@ def test_task_parameter_allowlist_and_recovery(tmp_path, monkeypatch):
                               "testbench_id": "../oracle.sv"})
     workbench.start_task({"source": "natural", "spec": "counter", "level": "static"})
     assert "--task-id" in captured["argv"]
-    assert captured["argv"][0] == "verilog_agent.benchmarks.single_case_demo"
+    assert captured["argv"][0] == "rtlforge.benchmarks.single_case_demo"
     assert captured["state"]["id"].startswith("task_")
+    assert captured["argv"][captured["argv"].index("--memory-mode") + 1] == "read_write"
 
 
 def test_benchmark_resume_reuses_config_and_rejects_changes(tmp_path, monkeypatch):
     repo, _ = _fixture(tmp_path)
     workbench = Workbench(repo)
-    (repo / ".env").write_text("VERILOG_AGENT_MODEL=test-model\nOPENAI_API_KEY=test\n",
+    (repo / ".env").write_text("RTLFORGE_MODEL=test-model\nOPENAI_API_KEY=test\n",
                               encoding="utf-8")
     monkeypatch.setattr(workbench, "settings", lambda profile=".env": {
         "configured": True, "model": "test-model"})
@@ -190,13 +191,13 @@ def test_benchmark_resume_reuses_config_and_rejects_changes(tmp_path, monkeypatc
         "dataset": "human_v2", "model": "test-model", "limit": 10,
         "provider_profile": ".env",
         "candidates": 2, "max_repairs": 2, "memory_mode": "off",
-        "docker_image": "verilog-agent-sandbox:reflection", "output": str(output),
+        "docker_image": "rtlforge-sandbox:reflection", "output": str(output),
     }
     captured = {}
     monkeypatch.setattr(workbench, "_launch", lambda state, argv: captured.update(
         state=state, argv=argv))
     payload = {"dataset": "human_v2", "model": "test-model", "limit": 10,
-               "resume_run_id": "run_old"}
+               "resume_run_id": "run_old", "memory_mode": "off"}
     workbench.start_benchmark(payload)
     assert captured["state"]["output"] == str(output)
     assert "--resume" in captured["argv"]
@@ -206,10 +207,10 @@ def test_benchmark_resume_reuses_config_and_rejects_changes(tmp_path, monkeypatc
 
 def test_provider_profiles_change_endpoint_and_hide_keys(tmp_path, monkeypatch):
     repo, _ = _fixture(tmp_path)
-    (repo / ".env").write_text("OPENAI_API_KEY=SECRET_A\nVERILOG_AGENT_MODEL=model-a\n"
+    (repo / ".env").write_text("OPENAI_API_KEY=SECRET_A\nRTLFORGE_MODEL=model-a\n"
                               "OPENAI_BASE_URL=https://a.example/v1\n", encoding="utf-8")
     (repo / ".env.qwen").write_text("OPENAI_API_KEY=SECRET_B\n"
-                                   "VERILOG_AGENT_MODEL=qwen3-coder-plus\n"
+                                   "RTLFORGE_MODEL=qwen3-coder-plus\n"
                                    "OPENAI_BASE_URL=https://b.example/v1\n", encoding="utf-8")
     workbench = Workbench(repo)
     monkeypatch.setattr(workbench, "docker_status", lambda: {"available": True})
@@ -225,7 +226,7 @@ def test_provider_profiles_change_endpoint_and_hide_keys(tmp_path, monkeypatch):
 
 def test_docker_unavailable_blocks_before_launch(tmp_path, monkeypatch):
     repo, _ = _fixture(tmp_path)
-    (repo / ".env").write_text("OPENAI_API_KEY=test\nVERILOG_AGENT_MODEL=test-model\n",
+    (repo / ".env").write_text("OPENAI_API_KEY=test\nRTLFORGE_MODEL=test-model\n",
                               encoding="utf-8")
     workbench = Workbench(repo)
     monkeypatch.setattr(workbench, "docker_status", lambda: {"available": False})

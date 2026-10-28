@@ -3,21 +3,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from verilog_agent.benchmarks import human_v2_batch, rtllm_batch
-from verilog_agent.providers import (
+from rtlforge.benchmarks import human_v2_batch, rtllm_batch
+from rtlforge.providers import (
     OpenAIResponsesProvider,
     ProviderConfigurationError,
     ProviderSettings,
 )
-from verilog_agent.providers.usage import RecordingProvider
+from rtlforge.providers.usage import RecordingProvider
 
 
 def test_sampling_env_and_actual_request_without_response_echo():
     settings = ProviderSettings.from_env({
-        "OPENAI_API_KEY": "test", "VERILOG_AGENT_MODEL": "qwen3-coder-plus",
+        "OPENAI_API_KEY": "test", "RTLFORGE_MODEL": "qwen3-coder-plus",
         "OPENAI_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "VERILOG_AGENT_TEMPERATURE": "0", "VERILOG_AGENT_TOP_P": "0.9",
-        "VERILOG_AGENT_SEED": "42",
+        "RTLFORGE_TEMPERATURE": "0", "RTLFORGE_TOP_P": "0.9",
+        "RTLFORGE_SEED": "42",
     })
     requests = []
 
@@ -44,22 +44,22 @@ def test_sampling_env_and_actual_request_without_response_echo():
 ])
 def test_invalid_sampling_rejected(key, value):
     with pytest.raises(ProviderConfigurationError):
-        ProviderSettings.from_env({"OPENAI_API_KEY": "test", "VERILOG_AGENT_MODEL": "model",
-                                   "VERILOG_AGENT_" + key: value})
+        ProviderSettings.from_env({"OPENAI_API_KEY": "test", "RTLFORGE_MODEL": "model",
+                                   "RTLFORGE_" + key: value})
 
 
 def test_explicit_api_style_from_env_and_invalid_value():
     settings = ProviderSettings.from_env({
-        "OPENAI_API_KEY": "test", "VERILOG_AGENT_MODEL": "model",
-        "VERILOG_AGENT_API_STYLE": "chat_completions",
+        "OPENAI_API_KEY": "test", "RTLFORGE_MODEL": "model",
+        "RTLFORGE_API_STYLE": "chat_completions",
     })
     assert settings.api_style == "chat_completions"
     assert settings.uses_chat_completions
     assert settings.sampling_configuration()["api_style"] == "chat_completions"
     with pytest.raises(ProviderConfigurationError, match="API_STYLE"):
         ProviderSettings.from_env({
-            "OPENAI_API_KEY": "test", "VERILOG_AGENT_MODEL": "model",
-            "VERILOG_AGENT_API_STYLE": "invalid",
+            "OPENAI_API_KEY": "test", "RTLFORGE_MODEL": "model",
+            "RTLFORGE_API_STYLE": "invalid",
         })
 
 

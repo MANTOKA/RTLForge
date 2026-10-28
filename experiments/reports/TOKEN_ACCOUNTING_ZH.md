@@ -1,5 +1,7 @@
 # LLM 调用与 token 计数
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../../docs/STATUS_ZH.md)。
+
 Planner、Generator、Debugger 在 Orchestrator 中自动接入 Provider 调用记录器，
 不改变结构化 JSON 返回值、提示词或候选/修复策略，包括重生成和每轮修复调用。
 

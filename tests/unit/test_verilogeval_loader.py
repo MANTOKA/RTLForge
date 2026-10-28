@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from verilog_agent.benchmarks.verilogeval import load_human_v2
+from rtlforge.benchmarks.verilogeval import load_human_v2
 
 
 def _write_case(root: Path, problem_id: str) -> None:

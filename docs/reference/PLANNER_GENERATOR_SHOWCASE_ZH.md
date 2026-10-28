@@ -1,5 +1,7 @@
 # Planner 与 Generator 逐阶段演示
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## 1. 当前究竟接入了什么 API
 
 项目实现的是 `OpenAIResponsesProvider` 适配器，使用 OpenAI Python SDK 的 Responses API
@@ -17,7 +19,7 @@
 Schema；只有 Chat Completions 接口的服务目前不能直接使用。
 
 Codex、ChatGPT 或 GitHub 的登录状态不会自动成为这个 Python 项目的 API Key。真实模式需要
-单独配置 `OPENAI_API_KEY` 和 `VERILOG_AGENT_MODEL`。
+单独配置 `OPENAI_API_KEY` 和 `RTLFORGE_MODEL`。
 OpenAI Key 的创建和 PowerShell 环境变量设置可参考
 [OpenAI Developer Quickstart](https://developers.openai.com/api/docs/quickstart)。
 
@@ -26,7 +28,7 @@ OpenAI Key 的创建和 PowerShell 环境变量设置可参考
 在仓库根目录执行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --offline-example
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo --offline-example
 ```
 
 程序使用一个固定的 4 位计数器示例，终端依次显示：
@@ -62,7 +64,7 @@ notepad .env
 
 ```dotenv
 OPENAI_API_KEY=替换为你的Key
-VERILOG_AGENT_MODEL=替换为服务商提供的模型ID
+RTLFORGE_MODEL=替换为服务商提供的模型ID
 OPENAI_BASE_URL=https://中转服务的基础地址/v1
 ```
 
@@ -77,7 +79,7 @@ PowerShell 中设置的同名变量，也不会把 Key 写入 `runs/`、数据�
 | `key` | `OPENAI_API_KEY` | 只写入本机 `.env` |
 | `url` | `OPENAI_BASE_URL` | 填基础地址；若给的是完整 `/responses` 地址，应去掉末尾 `/responses` |
 | `type` | 不直接填写 | 用来判断接口兼容性，当前必须是 OpenAI Responses API 兼容类型 |
-| 模型 ID | `VERILOG_AGENT_MODEL` | `type/key/url` 不能代替模型 ID，需向服务商查询 |
+| 模型 ID | `RTLFORGE_MODEL` | `type/key/url` 不能代替模型 ID，需向服务商查询 |
 
 当前代码最终请求 `POST <OPENAI_BASE_URL>/responses`。若中转只支持
 `POST .../chat/completions`，或者 `type` 是 Azure、Anthropic、Gemini，则不能直接使用当前
@@ -87,7 +89,7 @@ PowerShell 中设置的同名变量，也不会把 Key 写入 `runs/`、数据�
 配置后可先执行不联网、不消耗额度的检查：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo --check-config
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo --check-config
 ```
 
 它只显示模型、基础 URL、预期的 `/responses` 地址和 `api_key: configured (value hidden)`，
@@ -99,7 +101,7 @@ PowerShell 中设置的同名变量，也不会把 Key 写入 `runs/`、数据�
 执行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo
 ```
 
 看到下面的提示后粘贴一行需求并按 Enter：
@@ -140,7 +142,7 @@ Generator 候选是否采用了不同但功能等价的组织方式。
 也可以把需求直接写在命令后：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.agents.demo `
+.\.venv\Scripts\python.exe -m rtlforge.agents.demo `
   "设计模块 reg8，输入 clk、rst、en、d[7:0]，输出 q[7:0]……"
 ```
 

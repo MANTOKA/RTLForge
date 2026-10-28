@@ -1,5 +1,7 @@
 # Benchmark 与 Memory 数据策略
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 ## 现在就开始测试，不等 Debugger
 
 测试分三层引入：
@@ -12,7 +14,7 @@
 `*_test.sv` 只交给 Verification；`*_ref.sv` 只用于基准预检，永不进入 Agent prompt 或 Memory。
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.verilogeval `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.verilogeval `
   --dataset-root "D:\AI\VerilogMulti\VerilogCoder-main\hardware_agent\examples\VerilogCoder\verilog-eval-v2\dataset_dumpall"
 ```
 

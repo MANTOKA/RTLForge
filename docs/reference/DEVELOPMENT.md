@@ -1,5 +1,7 @@
 # Development baseline
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 This file defines the minimum repository conventions. It is intentionally small and may
 evolve through reviewed configuration-schema versions as the implementation grows.
 
@@ -40,9 +42,9 @@ relevant tests and documentation, and enters `main` through a pull request with 
 
 ## Model-provider environment
 
-The real Planner and Generator read `OPENAI_API_KEY` and `VERILOG_AGENT_MODEL` at runtime.
+The real Planner and Generator read `OPENAI_API_KEY` and `RTLFORGE_MODEL` at runtime.
 `OPENAI_BASE_URL` may point to another endpoint that implements the OpenAI Responses API and
 strict JSON Schema output. Timeouts, output limits, and SDK retries can be overridden with
-`VERILOG_AGENT_REQUEST_TIMEOUT_SECONDS`, `VERILOG_AGENT_MAX_OUTPUT_TOKENS`, and
-`VERILOG_AGENT_MAX_RETRIES`. The API key is excluded from object representations and model
+`RTLFORGE_REQUEST_TIMEOUT_SECONDS`, `RTLFORGE_MAX_OUTPUT_TOKENS`, and
+`RTLFORGE_MAX_RETRIES`. The API key is excluded from object representations and model
 responses are requested with `store=false`; it must still never be placed in a committed file.

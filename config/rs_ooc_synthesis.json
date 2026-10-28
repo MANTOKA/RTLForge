@@ -1,0 +1,8 @@
+{
+  "part": "xc7a12ticsg325-1L",
+  "clock_port": "clk",
+  "clock_period_ns": 10.0,
+  "resource_limits": {},
+  "mode": "out_of_context",
+  "require_timing": true
+}

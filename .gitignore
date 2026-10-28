@@ -10,6 +10,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
 .mypy_cache/
 .ruff_cache/
 .venv/
@@ -26,6 +27,16 @@ sim.out
 obj_dir/
 work/
 runs/
+memory_data/
+tmp/
+.Xil/
+build/
+dist/
+*.lic
+RTLForge.exe
+
+# Downloaded AMD executable; install locally, not as project source.
+vivado-mcp-server-*
 
 # External benchmark corpora are downloaded locally and never committed.
 data/benchmarks/*
@@ -38,9 +49,14 @@ docs/RS272257_*.md
 tests/integration/test_rs_harness.py
 tests/unit/test_rs_reference.py
 tests/unit/test_rs_testbench_agent.py
-verilog_agent/benchmarks/rs_demo.py
-verilog_agent/benchmarks/rs_reference.py
-verilog_agent/benchmarks/rs_synth.tcl
+rtlforge/benchmarks/rs_demo.py
+rtlforge/benchmarks/rs_reference.py
+rtlforge/benchmarks/rs_synth.tcl
+rtlforge/benchmarks/rs_decoder_inputs.py
+rtlforge/benchmarks/rs_decoder_tb.py
+rtlforge/memory/import_rs_interventions.py
+rtlforge/memory/publish_rs_repair.py
+tests/integration/test_rs_decoder_checker.py
 
 # Logs and editor files
 *.log

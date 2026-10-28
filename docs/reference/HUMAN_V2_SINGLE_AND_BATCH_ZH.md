@@ -1,18 +1,20 @@
 # Human v2 单题演示与批量评测
 
+> 2026-10-28 发布校对：本篇保留原设计/历史实验的日期、指标与协议；其中阶段性状态不代表当前实现。当前完成范围见[验收矩阵](../STATUS_ZH.md)。
+
 本项目提供两个相互独立、但复用同一执行管线的入口：
 
 1. 单题全过程 Demo：用于观察 Planner、Generator、Candidate Evaluation、Verification、
    Reflection Router 和 Debugger。
 2. Human v2 批量评测：用于运行 1、10 或全部 156 题，并持续生成 JSON 和 Markdown 报告。
 
-这三个 benchmark 入口统一位于 `verilog_agent/benchmarks/`：
+这三个 benchmark 入口统一位于 `rtlforge/benchmarks/`：
 
 - `single_case_demo.py`：单题全过程；
 - `human_v2_batch.py`：逐题批量运行和断点续跑；
 - `human_v2_compare.py`：两份同协议报告的配对比较。
 
-旧的 `verilog_agent.agents.demo` 仍是兼容入口，但实现已迁至 `benchmarks/single_case_demo.py`。
+旧的 `rtlforge.agents.demo` 仍是兼容入口，但实现已迁至 `benchmarks/single_case_demo.py`。
 
 ## 1. 数据文件在哪里
 
@@ -28,7 +30,7 @@
 本机 Human v2 数据目录为：
 
 ```text
-D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2
+D:\AI\VerilogMulti\RTLForge\data\benchmarks\verilog-eval-human-v2
 ```
 
 每道题有三个文件：
@@ -40,13 +42,13 @@ D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2
 可以直接查看 prompt：
 
 ```powershell
-Get-Content "D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
+Get-Content "D:\AI\VerilogMulti\RTLForge\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
 ```
 
 也可以用记事本打开：
 
 ```powershell
-notepad "D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
+notepad "D:\AI\VerilogMulti\RTLForge\data\benchmarks\verilog-eval-human-v2\Prob035_count1to10_prompt.txt"
 ```
 
 ## 2. 单题全过程 Demo
@@ -54,19 +56,19 @@ notepad "D:\AI\VerilogMulti\VerilogAgent\data\benchmarks\verilog-eval-human-v2\P
 先进入项目根目录：
 
 ```powershell
-cd D:\AI\VerilogMulti\VerilogAgent
+cd D:\AI\VerilogMulti\RTLForge
 ```
 
 运行一题，并允许最多一次 Debugger 修复：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.single_case_demo `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.single_case_demo `
   --human-v2-root "data\benchmarks\verilog-eval-human-v2" `
   --human-v2-case Prob155_lemmings4 `
   --candidates 2 `
   --static-evaluation `
   --max-repairs 2 `
-  --docker-image verilog-agent-sandbox:reflection
+  --docker-image rtlforge-sandbox:reflection
 ```
 
 该命令会真实调用 `.env` 中配置的模型。终端按顺序显示：
@@ -99,7 +101,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 先用一题检查配置和报告：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_batch `
   --limit 1 `
   --candidates 2 `
   --max-repairs 2 `
@@ -109,7 +111,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 开发阶段运行前 10 题：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_batch `
   --limit 10 `
   --candidates 2 `
   --max-repairs 2 `
@@ -122,7 +124,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 只重跑旧报告中的可修复失败题，并使用最多 3 轮修复：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_batch `
   --rerun-failures-from runs\human-v2\gpt-5.6-terra\reports\human_v2_dev10.json `
   --candidates 2 `
   --max-repairs 3 `
@@ -138,7 +140,7 @@ Human v2 testbench 同时实例化 Agent 的 `TopModule` 和官方 `RefModule`�
 
 ```powershell
   --memory-mode read_write `
-  --memory-database runs\human-v2\gpt-5.6-terra\state\verilog_agent_memory.sqlite
+  --memory-database runs\human-v2\gpt-5.6-terra\state\rtlforge_memory.sqlite
 ```
 
 `off` 是正式无记忆基线的默认值；`read_only` 只检索不写入；`read_write` 会保存所有修复尝试，
@@ -160,13 +162,13 @@ Memory 中也不保存 prompt、完整 RTL、golden testbench 或官方参考 RT
 
 ```powershell
 # 模型 A
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_batch `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型A的实际API模型ID" `
   --output runs\human-v2\model-a\reports\human_v2_batch.json
 
 # 模型 B
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_batch `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_batch `
   --limit 10 --candidates 2 --max-repairs 2 `
   --model "模型B的实际API模型ID" `
   --output runs\human-v2\model-b\reports\human_v2_batch.json
@@ -175,7 +177,7 @@ Memory 中也不保存 prompt、完整 RTL、golden testbench 或官方参考 RT
 两个运行都完成后生成配对比较报告：
 
 ```powershell
-.\.venv\Scripts\python.exe -m verilog_agent.benchmarks.human_v2_compare `
+.\.venv\Scripts\python.exe -m rtlforge.benchmarks.human_v2_compare `
   runs\human-v2\model-a\reports\human_v2_batch.json `
   runs\human-v2\model-b\reports\human_v2_batch.json `
   --output runs\human-v2\model-comparisons.md

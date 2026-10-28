@@ -3,22 +3,32 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "verilog-agent"
-version = "0.2.4"
-description = "Lightweight multi-agent RTL generation, verification, and repair system"
+name = "rtlforge"
+version = "0.3.0"
+description = "Agent platform for RTL design, verification, and implementation"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {file = "LICENSE"}
+
 dependencies = [
     "python-dotenv>=1.0,<2",
     "tomli>=2; python_version < '3.11'",
 ]
 
+[project.urls]
+Repository = "https://github.com/MANTOKA/RTLForge"
+Documentation = "https://github.com/MANTOKA/RTLForge/tree/main/docs"
+
 [project.optional-dependencies]
+mcp = [
+    "mcp>=1.20,<2",
+]
 llm = [
     "openai>=1.68.0",
 ]
 graph = [
     "langgraph>=1.2,<2",
+    "langgraph-checkpoint-sqlite>=3.1,<4",
 ]
 dev = [
     "pytest>=8",
@@ -29,10 +39,10 @@ dev = [
 py-modules = ["tool_wrapper"]
 
 [tool.setuptools.packages.find]
-include = ["verilog_agent*"]
+include = ["rtlforge*"]
 
 [tool.setuptools.package-data]
-"verilog_agent.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"rtlforge.web" = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 addopts = "-ra -p no:cacheprovider --basetemp=.pytest_tmp"

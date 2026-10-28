@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from verilog_agent.domain import PortDirection, PortSpec, SpecIR
-from verilog_agent.services.interface_check import check_rtl_interface
+from rtlforge.domain import PortDirection, PortSpec, SpecIR
+from rtlforge.services.interface_check import check_rtl_interface
 
 
 def _spec() -> SpecIR:

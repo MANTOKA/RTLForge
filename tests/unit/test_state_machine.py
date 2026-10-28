@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from verilog_agent.domain import RTLTaskContext, TaskStage
-from verilog_agent.orchestration.state_machine import InvalidTransition, transition
+from rtlforge.domain import RTLTaskContext, TaskStage
+from rtlforge.orchestration.state_machine import InvalidTransition, transition
 
 
 def test_state_machine_accepts_legal_transition() -> None:

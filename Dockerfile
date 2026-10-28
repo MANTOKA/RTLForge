@@ -18,16 +18,16 @@ RUN apt-get update -o Acquire::Retries=5 && apt-get install -y --no-install-reco
 # A fixed unprivileged identity prevents generated RTL from running as root.
 RUN groupadd --gid 10001 eda \
     && useradd --uid 10001 --gid eda --no-create-home --shell /usr/sbin/nologin eda \
-    && mkdir -p /work /opt/verilog-agent \
-    && chown -R eda:eda /work /opt/verilog-agent
+    && mkdir -p /work /opt/rtlforge \
+    && chown -R eda:eda /work /opt/rtlforge
 
-COPY --chown=eda:eda tool_wrapper.py /opt/verilog-agent/tool_wrapper.py
-COPY --chown=eda:eda config/static_score_v1.json /opt/verilog-agent/static_score_v1.json
+COPY --chown=eda:eda tool_wrapper.py /opt/rtlforge/tool_wrapper.py
+COPY --chown=eda:eda config/static_score_v1.json /opt/rtlforge/static_score_v1.json
 
 ENV TMPDIR=/work \
-    VERILOG_AGENT_INPUT_ROOT=/inputs \
-    VERILOG_AGENT_SCORE_CONFIG=/opt/verilog-agent/static_score_v1.json
+    RTLFORGE_INPUT_ROOT=/inputs \
+    RTLFORGE_SCORE_CONFIG=/opt/rtlforge/static_score_v1.json
 
 USER 10001:10001
 
-CMD ["python3", "-u", "/opt/verilog-agent/tool_wrapper.py"]
+CMD ["python3", "-u", "/opt/rtlforge/tool_wrapper.py"]

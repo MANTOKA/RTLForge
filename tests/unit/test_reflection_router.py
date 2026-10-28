@@ -1,4 +1,4 @@
-from verilog_agent.services import (
+from rtlforge.services import (
     AdaptiveReflectionRouter,
     ReflectionAction,
     ReflectionPolicy,
